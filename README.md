@@ -17,7 +17,7 @@ Build output can be found in `build/`
 If everything is all right, it should output something along this:
 ```
   Contract: SFC
-    Nde
+    Node
       ✓ Should migrate to New address (67ms)
       ✓ Should not migrate if not owner (56ms)
       ✓ Should not copyCode if not owner (41ms)
@@ -30,7 +30,7 @@ If everything is all right, it should output something along this:
       ✓ Should not advance epoch if not owner (43ms)
       ✓ Should not set backend if not backend address
       ✓ Should not swap code if not backend address (40ms)
-      ✓ Should not be possible add a Genesis Validator through NodeDriver if not called by Node (55ms)
+      ✓ Should not be possible to add a Genesis Validator through NodeDriver if not called by Node (55ms)
       ✓ Should not be possible to deactivate a validator through NodeDriver if not called by Node (40ms)
       ✓ Should not be possible to add a Genesis Delegation through NodeDriver if not called by node
       ✓ Should not be possible to seal Epoch Validators through NodeDriver if not called by node

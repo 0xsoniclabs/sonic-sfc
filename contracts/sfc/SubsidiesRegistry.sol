@@ -8,13 +8,16 @@ contract SubsidiesRegistry {
     ISFC private constant sfc = ISFC(0xFC00FACE00000000000000000000000000000000);
 
     // Policy 1: From -> To -> Deposit Amount
-    mapping(address => mapping(address => uint256)) public userSponsorships;
+    mapping(address from => mapping(address to => uint256 amount)) public userSponsorships;
 
     // Policy 2: To -> Operation Hash -> Deposit Amount
-    mapping(address => mapping(bytes32 => uint256)) public operationSponsorships;
+    mapping(address to => mapping(bytes32 operation => uint256 amount)) public operationSponsorships;
 
     // Policy 3: To -> Deposit Amount
-    mapping(address => uint256) public contractSponsorships;
+    mapping(address to => uint256 amount) public contractSponsorships;
+
+    error NotNode();
+    error NotSponsored();
 
     function sponsorUser(address from, address to) public payable {
         userSponsorships[from][to] += msg.value;
@@ -42,8 +45,13 @@ contract SubsidiesRegistry {
     }
 
     function deductFees(address from, address to, bytes32 operationHash, uint256 fee) public {
-        require(msg.sender == address(0)); // < only be called through internal transactions
-        require(isCovered(from, to, operationHash, fee));
+        if (msg.sender != address(0)) {
+            revert NotNode();
+        }
+        if (!isCovered(from, to, operationHash, fee)) {
+            revert NotSponsored();
+        }
+
         sfc.burnNativeTokens{value: fee}();
         if (userSponsorships[from][to] >= fee) {
             userSponsorships[from][to] -= fee;

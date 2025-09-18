@@ -7,7 +7,7 @@ import {ISFC} from "../interfaces/ISFC.sol";
 
 contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
 
-    ISFC private immutable sfc = ISFC(0xFC00FACE00000000000000000000000000000000);
+    ISFC private constant sfc = ISFC(0xFC00FACE00000000000000000000000000000000);
 
     // User-Contract sponsorship: From -> To -> Deposit Amount
     mapping(address from => mapping(address to => uint256 amount)) public userContractAvailable;
@@ -34,14 +34,25 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     mapping(address from => mapping(address to => mapping(bytes4 operation => uint256 amount))) public userOperationTotal;
     mapping(address from => mapping(address to => mapping(bytes4 operation => mapping(address sponsor => uint256 amount)))) public userOperationSponsor;
 
+    event UserContractSponsored(address indexed from, address indexed to, address indexed sponsor, uint256 amount);
+    event UserContractUnsponsored(address indexed from, address indexed to, address indexed sponsor, uint256 amount);
+    event OperationSponsored(address indexed to, bytes4 indexed operation, address indexed sponsor, uint256 amount);
+    event OperationUnsponsored(address indexed to, bytes4 indexed operation, address indexed sponsor, uint256 amount);
+    event ContractSponsored(address indexed to, address indexed sponsor, uint256 amount);
+    event ContractUnsponsored(address indexed to, address indexed sponsor, uint256 amount);
+    event UserSponsored(address indexed from, address indexed sponsor, uint256 amount);
+    event UserUnsponsored(address indexed from, address indexed sponsor, uint256 amount);
+    event UserOperationSponsored(address indexed from, address indexed to, bytes4 operation, address indexed sponsor, uint256 amount);
+    event UserOperationUnsponsored(address indexed from, address indexed to, bytes4 operation, address indexed sponsor, uint256 amount);
+
     error NotNode();
     error NotSponsored();
     error NothingToWithdraw();
+    error TransferFailed();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(ISFC _sfc) {
+    constructor() {
         _disableInitializers();
-        sfc = _sfc;
     }
 
     /// Initialization is called only once, after the contract deployment.
@@ -50,10 +61,12 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
         __UUPSUpgradeable_init();
     }
 
+    /// @notice Sponsor calls of a user to a contract
     function sponsorUserContract(address from, address to) public payable {
         userContractAvailable[from][to] += msg.value;
         userContractTotal[from][to] += msg.value;
         userContractSponsor[from][to][msg.sender] += msg.value;
+        emit UserContractSponsored(from, to, msg.sender, msg.value);
     }
 
     function userContractWithdrawable(address from, address to, address sponsor) public view returns(uint256) {
@@ -71,12 +84,19 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
         userContractAvailable[from][to] -= amount;
         userContractTotal[from][to] -= amount;
         userContractSponsor[from][to][msg.sender] -= amount;
+
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, TransferFailed());
+
+        emit UserContractUnsponsored(from, to, msg.sender, amount);
     }
 
+    /// @notice Sponsor calls of a method of a contract
     function sponsorOperation(address to, bytes4 operation) public payable {
         operationAvailable[to][operation] += msg.value;
         operationTotal[to][operation] += msg.value;
         operationSponsor[to][operation][msg.sender] += msg.value;
+        emit OperationSponsored(to, operation, msg.sender, msg.value);
     }
 
     function operationWithdrawable(address to, bytes4 operation, address sponsor) public view returns(uint256) {
@@ -94,12 +114,19 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
         operationAvailable[to][operation] -= amount;
         operationTotal[to][operation] -= amount;
         operationSponsor[to][operation][msg.sender] -= amount;
+
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, TransferFailed());
+
+        emit OperationUnsponsored(to, operation, msg.sender, amount);
     }
 
+    /// @notice Sponsor calls of a contract
     function sponsorContract(address to) public payable {
         contractAvailable[to] += msg.value;
         contractTotal[to] += msg.value;
         contractSponsor[to][msg.sender] += msg.value;
+        emit ContractSponsored(to, msg.sender, msg.value);
     }
 
     function contractWithdrawable(address to, address sponsor) public view returns(uint256) {
@@ -117,12 +144,19 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
         contractAvailable[to] -= amount;
         contractTotal[to] -= amount;
         contractSponsor[to][msg.sender] -= amount;
+
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, TransferFailed());
+
+        emit ContractUnsponsored(to, msg.sender, amount);
     }
 
+    /// @notice Sponsor calls of the given sender
     function sponsorUser(address from) public payable {
         userAvailable[from] += msg.value;
         userTotal[from] += msg.value;
         userSponsor[from][msg.sender] += msg.value;
+        emit UserSponsored(from, msg.sender, msg.value);
     }
 
     function userWithdrawable(address from, address sponsor) public view returns(uint256) {
@@ -137,15 +171,22 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
         if (amount == 0) {
             revert NothingToWithdraw();
         }
-        contractAvailable[from] -= amount;
-        contractTotal[from] -= amount;
-        contractSponsor[from][msg.sender] -= amount;
+        userAvailable[from] -= amount;
+        userTotal[from] -= amount;
+        userSponsor[from][msg.sender] -= amount;
+
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, TransferFailed());
+
+        emit UserUnsponsored(from, msg.sender, amount);
     }
 
+    /// @notice Sponsor calls of a user to a method of a contract
     function sponsorUserOperation(address from, address to, bytes4 operation) public payable {
         userOperationAvailable[from][to][operation] += msg.value;
         userOperationTotal[from][to][operation] += msg.value;
         userOperationSponsor[from][to][operation][msg.sender] += msg.value;
+        emit UserOperationSponsored(from, to, operation, msg.sender, msg.value);
     }
 
     function userOperationWithdrawable(address from, address to, bytes4 operation, address sponsor) public view returns(uint256) {
@@ -163,6 +204,11 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
         userOperationAvailable[from][to][operation] -= amount;
         userOperationTotal[from][to][operation] -= amount;
         userOperationSponsor[from][to][operation][msg.sender] -= amount;
+
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, TransferFailed());
+
+        emit UserOperationUnsponsored(from, to, operation, msg.sender, amount);
     }
 
     function isCovered(address from, address to, bytes4 operation, uint256 fee) public view returns(bool) {
@@ -185,12 +231,8 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     }
 
     function deductFees(address from, address to, bytes4 operation, uint256 fee) public {
-        if (msg.sender != address(0)) {
-            revert NotNode();
-        }
-        if (!isCovered(from, to, operation, fee)) {
-            revert NotSponsored();
-        }
+        require(msg.sender == address(0), NotNode());
+        require(isCovered(from, to, operation, fee), NotSponsored());
 
         sfc.burnNativeTokens{value: fee}();
         if (userContractAvailable[from][to] >= fee) {
@@ -219,8 +261,4 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     // solhint-disable-next-line no-empty-blocks
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    // TODO: define policies for the following features
-    // - Access order of sponsorship policies
-    // - Admin functions
-    // - Events
 }

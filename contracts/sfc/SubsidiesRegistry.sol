@@ -49,6 +49,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     error NotSponsored();
     error NothingToWithdraw();
     error TransferFailed();
+    error NotAllowedInSponsoredTx();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -89,6 +90,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
         uint256 maxAmount = userContractWithdrawable(from, to, msg.sender);
         if (amount > maxAmount) amount = maxAmount;
         require(amount != 0, NothingToWithdraw());
+        require(notInSponsoredTx(), NotAllowedInSponsoredTx());
 
         userContractAvailable[from][to] -= amount;
         userContractTotal[from][to] -= amount;
@@ -126,7 +128,8 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     function unsponsorOperation(address to, bytes4 operation, uint256 amount) public {
         uint256 maxAmount = operationWithdrawable(to, operation, msg.sender);
         if (amount > maxAmount) amount = maxAmount;
-        if (amount == 0) revert NothingToWithdraw();
+        require(amount != 0, NothingToWithdraw());
+        require(notInSponsoredTx(), NotAllowedInSponsoredTx());
 
         operationAvailable[to][operation] -= amount;
         operationTotal[to][operation] -= amount;
@@ -161,7 +164,8 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     function unsponsorContract(address to, uint256 amount) public {
         uint256 maxAmount = contractWithdrawable(to, msg.sender);
         if (amount > maxAmount) amount = maxAmount;
-        if (amount == 0) revert NothingToWithdraw();
+        require(amount != 0, NothingToWithdraw());
+        require(notInSponsoredTx(), NotAllowedInSponsoredTx());
 
         contractAvailable[to] -= amount;
         contractTotal[to] -= amount;
@@ -196,7 +200,8 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     function unsponsorUser(address from, uint256 amount) public {
         uint256 maxAmount = userWithdrawable(from, msg.sender);
         if (amount > maxAmount) amount = maxAmount;
-        if (amount == 0) revert NothingToWithdraw();
+        require(amount != 0, NothingToWithdraw());
+        require(notInSponsoredTx(), NotAllowedInSponsoredTx());
 
         userAvailable[from] -= amount;
         userTotal[from] -= amount;
@@ -237,7 +242,8 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     function unsponsorUserOperation(address from, address to, bytes4 operation, uint256 amount) public {
         uint256 maxAmount = userOperationWithdrawable(from, to, operation, msg.sender);
         if (amount > maxAmount) amount = maxAmount;
-        if (amount == 0) revert NothingToWithdraw();
+        require(amount != 0, NothingToWithdraw());
+        require(notInSponsoredTx(), NotAllowedInSponsoredTx());
 
         userOperationAvailable[from][to][operation] -= amount;
         userOperationTotal[from][to][operation] -= amount;
@@ -298,5 +304,9 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
 
     /// Override the upgrade authorization check to allow upgrades only from the owner.
     function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    function notInSponsoredTx() private view returns (bool) {
+        return tx.gasprice != 0;
+    }
 
 }

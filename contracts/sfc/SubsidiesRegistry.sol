@@ -7,32 +7,28 @@ import {ISFC} from "../interfaces/ISFC.sol";
 
 contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
 
+    struct Sponsorship {
+        uint256 available;
+        uint256 totalContributions;
+        mapping(address => uint256) contributors;
+    }
+
     ISFC private constant sfc = ISFC(0xFC00FACE00000000000000000000000000000000);
 
-    // User-Contract sponsorship: From -> To -> Deposit Amount
-    mapping(address from => mapping(address to => uint256 amount)) public userContractAvailable;
-    mapping(address from => mapping(address to => uint256 amount)) public userContractTotal;
-    mapping(address from => mapping(address to => mapping(address sponsor => uint256 amount))) public userContractSponsor;
+    // User-Contract sponsorship: From -> To -> Sponsorship
+    mapping(address from => mapping(address to => Sponsorship)) public userContractSponsorship;
 
-    // Operation sponsorship: To -> Operation Signature -> Deposit Amount
-    mapping(address to => mapping(bytes4 operation => uint256 amount)) public operationAvailable;
-    mapping(address to => mapping(bytes4 operation => uint256 amount)) public operationTotal;
-    mapping(address to => mapping(bytes4 operation => mapping(address sponsor => uint256 amount))) public operationSponsor;
+    // Operation sponsorship: To -> Operation Signature -> Sponsorship
+    mapping(address to => mapping(bytes4 operation => Sponsorship)) public operationSponsorship;
 
-    // Contract sponsorship: To -> Deposit Amount
-    mapping(address to => uint256 amount) public contractAvailable;
-    mapping(address to => uint256 amount) public contractTotal;
-    mapping(address to => mapping(address sponsor => uint256 amount)) public contractSponsor;
+    // Contract sponsorship: To -> Sponsorship
+    mapping(address to => Sponsorship) public contractSponsorship;
 
-    // User sponsorship: From -> Deposit Amount
-    mapping(address from => uint256 amount) public userAvailable;
-    mapping(address from => uint256 amount) public userTotal;
-    mapping(address from => mapping(address sponsor => uint256 amount)) public userSponsor;
+    // User sponsorship: From -> Sponsorship
+    mapping(address from => Sponsorship) public userSponsorship;
 
-    // User-Operation sponsorship: From -> To -> Operation Signature -> Deposit Amount
-    mapping(address from => mapping(address to => mapping(bytes4 operation => uint256 amount))) public userOperationAvailable;
-    mapping(address from => mapping(address to => mapping(bytes4 operation => uint256 amount))) public userOperationTotal;
-    mapping(address from => mapping(address to => mapping(bytes4 operation => mapping(address sponsor => uint256 amount)))) public userOperationSponsor;
+    // User-Operation sponsorship: From -> To -> Operation Signature -> Sponsorship
+    mapping(address from => mapping(address to => mapping(bytes4 operation => Sponsorship))) public userOperationSponsorship;
 
     event UserContractSponsored(address indexed from, address indexed to, address indexed sponsor, uint256 amount);
     event UserContractUnsponsored(address indexed from, address indexed to, address indexed sponsor, uint256 amount);
@@ -67,9 +63,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @param from The user address to be sponsored
     /// @param to The contract address to be sponsored
     function sponsorUserContract(address from, address to) public payable {
-        userContractAvailable[from][to] += msg.value;
-        userContractTotal[from][to] += msg.value;
-        userContractSponsor[from][to][msg.sender] += msg.value;
+        _sponsor(userContractSponsorship[from][to], msg.sender, msg.value);
         emit UserContractSponsored(from, to, msg.sender, msg.value);
     }
 
@@ -79,7 +73,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @param sponsor The sponsor address
     /// @return Withdrawable amount in wei
     function userContractWithdrawable(address from, address to, address sponsor) public view returns(uint256) {
-        return userContractAvailable[from][to] * userContractSponsor[from][to][sponsor] / userContractTotal[from][to];
+        return _availableToWithdraw(userContractSponsorship[from][to], sponsor);
     }
 
     /// @notice Withdraw from a user-contract sponsorship
@@ -87,18 +81,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @param to The contract address being sponsored
     /// @param amount Amount to withdraw in wei (capped to available)
     function unsponsorUserContract(address from, address to, uint256 amount) public {
-        uint256 maxAmount = userContractWithdrawable(from, to, msg.sender);
-        if (amount > maxAmount) amount = maxAmount;
-        require(amount != 0, NothingToWithdraw());
-        require(notInSponsoredTx(), NotAllowedInSponsoredTx());
-
-        userContractAvailable[from][to] -= amount;
-        userContractTotal[from][to] -= amount;
-        userContractSponsor[from][to][msg.sender] -= amount;
-
-        (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, TransferFailed());
-
+        _withdraw(userContractSponsorship[from][to], msg.sender, amount);
         emit UserContractUnsponsored(from, to, msg.sender, amount);
     }
 
@@ -106,9 +89,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @param to The contract address
     /// @param operation The 4-byte operation selector
     function sponsorOperation(address to, bytes4 operation) public payable {
-        operationAvailable[to][operation] += msg.value;
-        operationTotal[to][operation] += msg.value;
-        operationSponsor[to][operation][msg.sender] += msg.value;
+        _sponsor(operationSponsorship[to][operation], msg.sender, msg.value);
         emit OperationSponsored(to, operation, msg.sender, msg.value);
     }
 
@@ -118,7 +99,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @param sponsor The sponsor address
     /// @return Withdrawable amount in wei
     function operationWithdrawable(address to, bytes4 operation, address sponsor) public view returns(uint256) {
-        return operationAvailable[to][operation] * operationSponsor[to][operation][sponsor] / operationTotal[to][operation];
+        return _availableToWithdraw(operationSponsorship[to][operation], sponsor);
     }
 
     /// @notice Withdraw from an operation sponsorship
@@ -126,27 +107,14 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @param operation The 4-byte operation selector
     /// @param amount Amount to withdraw in wei
     function unsponsorOperation(address to, bytes4 operation, uint256 amount) public {
-        uint256 maxAmount = operationWithdrawable(to, operation, msg.sender);
-        if (amount > maxAmount) amount = maxAmount;
-        require(amount != 0, NothingToWithdraw());
-        require(notInSponsoredTx(), NotAllowedInSponsoredTx());
-
-        operationAvailable[to][operation] -= amount;
-        operationTotal[to][operation] -= amount;
-        operationSponsor[to][operation][msg.sender] -= amount;
-
-        (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, TransferFailed());
-
+        _withdraw(operationSponsorship[to][operation], msg.sender, amount);
         emit OperationUnsponsored(to, operation, msg.sender, amount);
     }
 
     /// @notice Sponsor a contract calls
     /// @param to The contract address to be sponsored
     function sponsorContract(address to) public payable {
-        contractAvailable[to] += msg.value;
-        contractTotal[to] += msg.value;
-        contractSponsor[to][msg.sender] += msg.value;
+        _sponsor(contractSponsorship[to], msg.sender, msg.value);
         emit ContractSponsored(to, msg.sender, msg.value);
     }
 
@@ -155,34 +123,21 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @param sponsor Sponsor address
     /// @return Withdrawable amount in wei
     function contractWithdrawable(address to, address sponsor) public view returns(uint256) {
-        return contractAvailable[to] * contractSponsor[to][sponsor] / contractTotal[to];
+        return _availableToWithdraw(contractSponsorship[to], sponsor);
     }
 
     /// @notice Withdraw from a contract sponsorship
     /// @param to The contract address
     /// @param amount Amount to withdraw in wei
     function unsponsorContract(address to, uint256 amount) public {
-        uint256 maxAmount = contractWithdrawable(to, msg.sender);
-        if (amount > maxAmount) amount = maxAmount;
-        require(amount != 0, NothingToWithdraw());
-        require(notInSponsoredTx(), NotAllowedInSponsoredTx());
-
-        contractAvailable[to] -= amount;
-        contractTotal[to] -= amount;
-        contractSponsor[to][msg.sender] -= amount;
-
-        (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, TransferFailed());
-
+        _withdraw(contractSponsorship[to], msg.sender, amount);
         emit ContractUnsponsored(to, msg.sender, amount);
     }
 
     /// @notice Sponsor any transaction from a user
     /// @param from The user address to be sponsored
     function sponsorUser(address from) public payable {
-        userAvailable[from] += msg.value;
-        userTotal[from] += msg.value;
-        userSponsor[from][msg.sender] += msg.value;
+        _sponsor(userSponsorship[from], msg.sender, msg.value);
         emit UserSponsored(from, msg.sender, msg.value);
     }
 
@@ -191,25 +146,14 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @param sponsor Sponsor address
     /// @return Withdrawable amount in wei
     function userWithdrawable(address from, address sponsor) public view returns(uint256) {
-        return userAvailable[from] * userSponsor[from][sponsor] / userTotal[from];
+        return _availableToWithdraw(userSponsorship[from], sponsor);
     }
 
     /// @notice Withdraw from a user sponsorship
     /// @param from User address
     /// @param amount Amount to withdraw in wei
     function unsponsorUser(address from, uint256 amount) public {
-        uint256 maxAmount = userWithdrawable(from, msg.sender);
-        if (amount > maxAmount) amount = maxAmount;
-        require(amount != 0, NothingToWithdraw());
-        require(notInSponsoredTx(), NotAllowedInSponsoredTx());
-
-        userAvailable[from] -= amount;
-        userTotal[from] -= amount;
-        userSponsor[from][msg.sender] -= amount;
-
-        (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, TransferFailed());
-
+        _withdraw(userSponsorship[from], msg.sender, amount);
         emit UserUnsponsored(from, msg.sender, amount);
     }
 
@@ -218,9 +162,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @param to Contract address
     /// @param operation 4-byte operation selector
     function sponsorUserOperation(address from, address to, bytes4 operation) public payable {
-        userOperationAvailable[from][to][operation] += msg.value;
-        userOperationTotal[from][to][operation] += msg.value;
-        userOperationSponsor[from][to][operation][msg.sender] += msg.value;
+        _sponsor(userOperationSponsorship[from][to][operation], msg.sender, msg.value);
         emit UserOperationSponsored(from, to, operation, msg.sender, msg.value);
     }
 
@@ -231,7 +173,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @param sponsor Sponsor address
     /// @return Withdrawable amount in wei
     function userOperationWithdrawable(address from, address to, bytes4 operation, address sponsor) public view returns(uint256) {
-        return userOperationAvailable[from][to][operation] * userOperationSponsor[from][to][operation][sponsor] / userOperationTotal[from][to][operation];
+        return _availableToWithdraw(userOperationSponsorship[from][to][operation], sponsor);
     }
 
     /// @notice Withdraw sponsorship from a user's operation
@@ -240,18 +182,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @param operation 4-byte operation selector
     /// @param amount Amount to withdraw in wei
     function unsponsorUserOperation(address from, address to, bytes4 operation, uint256 amount) public {
-        uint256 maxAmount = userOperationWithdrawable(from, to, operation, msg.sender);
-        if (amount > maxAmount) amount = maxAmount;
-        require(amount != 0, NothingToWithdraw());
-        require(notInSponsoredTx(), NotAllowedInSponsoredTx());
-
-        userOperationAvailable[from][to][operation] -= amount;
-        userOperationTotal[from][to][operation] -= amount;
-        userOperationSponsor[from][to][operation][msg.sender] -= amount;
-
-        (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, TransferFailed());
-
+        _withdraw(userOperationSponsorship[from][to][operation], msg.sender, amount);
         emit UserOperationUnsponsored(from, to, operation, msg.sender, amount);
     }
 
@@ -262,12 +193,12 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @param fee Fee amount in wei
     /// @return True if fee is covered, false otherwise
     function isCovered(address from, address to, bytes calldata data, uint256 fee) public view returns(bool) {
-        if (userContractAvailable[from][to] >= fee) return true;
         bytes4 operation = bytes4(data[0:4]);
-        if (operationAvailable[to][operation] >= fee) return true;
-        if (contractAvailable[to] >= fee) return true;
-        if (userAvailable[from] >= fee) return true;
-        if (userOperationAvailable[from][to][operation] >= fee) return true;
+        if (userContractSponsorship[from][to].available >= fee) return true;
+        if (operationSponsorship[to][operation].available >= fee) return true;
+        if (contractSponsorship[to].available >= fee) return true;
+        if (userSponsorship[from].available >= fee) return true;
+        if (userOperationSponsorship[from][to][operation].available >= fee) return true;
         return false;
     }
 
@@ -281,25 +212,25 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
         require(isCovered(from, to, data, fee), NotSponsored());
 
         sfc.burnNativeTokens{value: fee}();
-        if (userContractAvailable[from][to] >= fee) {
-            userContractAvailable[from][to] -= fee;
-            return;
-        }
         bytes4 operation = bytes4(data[0:4]);
-        if (operationAvailable[to][operation] >= fee) {
-            operationAvailable[to][operation] -= fee;
+        if (userContractSponsorship[from][to].available >= fee) {
+            userContractSponsorship[from][to].available -= fee;
             return;
         }
-        if (contractAvailable[to] >= fee) {
-            contractAvailable[to] -= fee;
+        if (operationSponsorship[to][operation].available >= fee) {
+            operationSponsorship[to][operation].available -= fee;
             return;
         }
-        if (userAvailable[from] >= fee) {
-            userAvailable[from] -= fee;
+        if (contractSponsorship[to].available >= fee) {
+            contractSponsorship[to].available -= fee;
             return;
         }
-        if (userOperationAvailable[from][to][operation] >= fee) {
-            userOperationAvailable[from][to][operation] -= fee;
+        if (userSponsorship[from].available >= fee) {
+            userSponsorship[from].available -= fee;
+            return;
+        }
+        if (userOperationSponsorship[from][to][operation].available >= fee) {
+            userOperationSponsorship[from][to][operation].available -= fee;
             return;
         }
     }
@@ -307,8 +238,28 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// Override the upgrade authorization check to allow upgrades only from the owner.
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    function notInSponsoredTx() private view returns (bool) {
-        return tx.gasprice != 0;
+    function _sponsor(Sponsorship storage sponsorship, address sponsor, uint256 amount) private {
+        sponsorship.available += amount;
+        sponsorship.contributors[sponsor] += amount;
+        sponsorship.totalContributions += amount;
+    }
+
+    function _availableToWithdraw(Sponsorship storage sponsorship, address sponsor) private view returns (uint256) {
+        return sponsorship.available * sponsorship.contributors[sponsor] / sponsorship.totalContributions;
+    }
+
+    function _withdraw(Sponsorship storage sponsorship, address sponsor, uint256 amount) private {
+        uint256 maxAmount = _availableToWithdraw(sponsorship, sponsor);
+        if (amount > maxAmount) amount = maxAmount;
+        require(amount != 0, NothingToWithdraw());
+        require(tx.gasprice != 0, NotAllowedInSponsoredTx());
+
+        sponsorship.available -= amount;
+        sponsorship.totalContributions -= amount;
+        sponsorship.contributors[sponsor] -= amount;
+
+        (bool success, ) = sponsor.call{value: amount}("");
+        require(success, TransferFailed());
     }
 
 }

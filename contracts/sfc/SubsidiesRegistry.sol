@@ -6,14 +6,13 @@ import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Own
 import {ISFC} from "../interfaces/ISFC.sol";
 
 contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
-
     struct Sponsorship {
         uint256 available;
         uint256 totalContributions;
         mapping(address => uint256) contributors;
     }
 
-    ISFC private constant sfc = ISFC(0xFC00FACE00000000000000000000000000000000);
+    ISFC private constant SFC = ISFC(0xFC00FACE00000000000000000000000000000000);
 
     // User-Contract sponsorship: From -> To -> Sponsorship
     mapping(address from => mapping(address to => Sponsorship)) public userContractSponsorship;
@@ -28,7 +27,8 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     mapping(address from => Sponsorship) public userSponsorship;
 
     // User-Operation sponsorship: From -> To -> Operation Signature -> Sponsorship
-    mapping(address from => mapping(address to => mapping(bytes4 operation => Sponsorship))) public userOperationSponsorship;
+    mapping(address from => mapping(address to => mapping(bytes4 operation => Sponsorship)))
+        public userOperationSponsorship;
 
     event UserContractSponsored(address indexed from, address indexed to, address indexed sponsor, uint256 amount);
     event UserContractUnsponsored(address indexed from, address indexed to, address indexed sponsor, uint256 amount);
@@ -38,8 +38,20 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     event ContractUnsponsored(address indexed to, address indexed sponsor, uint256 amount);
     event UserSponsored(address indexed from, address indexed sponsor, uint256 amount);
     event UserUnsponsored(address indexed from, address indexed sponsor, uint256 amount);
-    event UserOperationSponsored(address indexed from, address indexed to, bytes4 operation, address indexed sponsor, uint256 amount);
-    event UserOperationUnsponsored(address indexed from, address indexed to, bytes4 operation, address indexed sponsor, uint256 amount);
+    event UserOperationSponsored(
+        address indexed from,
+        address indexed to,
+        bytes4 operation,
+        address indexed sponsor,
+        uint256 amount
+    );
+    event UserOperationUnsponsored(
+        address indexed from,
+        address indexed to,
+        bytes4 operation,
+        address indexed sponsor,
+        uint256 amount
+    );
 
     error NotNode();
     error NotSponsored();
@@ -72,7 +84,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @param to The contract address being sponsored
     /// @param sponsor The sponsor address
     /// @return Withdrawable amount in wei
-    function userContractWithdrawable(address from, address to, address sponsor) public view returns(uint256) {
+    function userContractWithdrawable(address from, address to, address sponsor) public view returns (uint256) {
         return _availableToWithdraw(userContractSponsorship[from][to], sponsor);
     }
 
@@ -98,7 +110,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @param operation The 4-byte operation selector
     /// @param sponsor The sponsor address
     /// @return Withdrawable amount in wei
-    function operationWithdrawable(address to, bytes4 operation, address sponsor) public view returns(uint256) {
+    function operationWithdrawable(address to, bytes4 operation, address sponsor) public view returns (uint256) {
         return _availableToWithdraw(operationSponsorship[to][operation], sponsor);
     }
 
@@ -122,7 +134,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @param to The contract address
     /// @param sponsor Sponsor address
     /// @return Withdrawable amount in wei
-    function contractWithdrawable(address to, address sponsor) public view returns(uint256) {
+    function contractWithdrawable(address to, address sponsor) public view returns (uint256) {
         return _availableToWithdraw(contractSponsorship[to], sponsor);
     }
 
@@ -145,7 +157,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @param from User address
     /// @param sponsor Sponsor address
     /// @return Withdrawable amount in wei
-    function userWithdrawable(address from, address sponsor) public view returns(uint256) {
+    function userWithdrawable(address from, address sponsor) public view returns (uint256) {
         return _availableToWithdraw(userSponsorship[from], sponsor);
     }
 
@@ -172,7 +184,12 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @param operation 4-byte operation selector
     /// @param sponsor Sponsor address
     /// @return Withdrawable amount in wei
-    function userOperationWithdrawable(address from, address to, bytes4 operation, address sponsor) public view returns(uint256) {
+    function userOperationWithdrawable(
+        address from,
+        address to,
+        bytes4 operation,
+        address sponsor
+    ) public view returns (uint256) {
         return _availableToWithdraw(userOperationSponsorship[from][to][operation], sponsor);
     }
 
@@ -192,7 +209,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @param data The calldata of the transaction
     /// @param fee Fee amount in wei
     /// @return True if fee is covered, false otherwise
-    function isCovered(address from, address to, bytes calldata data, uint256 fee) public view returns(bool) {
+    function isCovered(address from, address to, bytes calldata data, uint256 fee) public view returns (bool) {
         bytes4 operation = bytes4(data[0:4]);
         if (userContractSponsorship[from][to].available >= fee) return true;
         if (operationSponsorship[to][operation].available >= fee) return true;
@@ -211,7 +228,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
         require(msg.sender == address(0), NotNode());
         require(isCovered(from, to, data, fee), NotSponsored());
 
-        sfc.burnNativeTokens{value: fee}();
+        SFC.burnNativeTokens{value: fee}();
         bytes4 operation = bytes4(data[0:4]);
         if (userContractSponsorship[from][to].available >= fee) {
             userContractSponsorship[from][to].available -= fee;
@@ -236,6 +253,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     }
 
     /// Override the upgrade authorization check to allow upgrades only from the owner.
+    // solhint-disable-next-line no-empty-blocks
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
     function _sponsor(Sponsorship storage sponsorship, address sponsor, uint256 amount) private {
@@ -245,7 +263,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     }
 
     function _availableToWithdraw(Sponsorship storage sponsorship, address sponsor) private view returns (uint256) {
-        return sponsorship.available * sponsorship.contributors[sponsor] / sponsorship.totalContributions;
+        return (sponsorship.available * sponsorship.contributors[sponsor]) / sponsorship.totalContributions;
     }
 
     function _withdraw(Sponsorship storage sponsorship, address sponsor, uint256 amount) private {
@@ -261,5 +279,4 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
         (bool success, ) = sponsor.call{value: amount}("");
         require(success, TransferFailed());
     }
-
 }

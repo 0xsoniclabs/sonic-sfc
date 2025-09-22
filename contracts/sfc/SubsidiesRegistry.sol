@@ -97,6 +97,14 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
         emit UserContractUnsponsored(from, to, msg.sender, amount);
     }
 
+    /// @notice Get the contribution of a sponsor to a user-contract sponsorship
+    /// @param from The user address being sponsored
+    /// @param to The contract address being sponsored
+    /// @param contributor The sponsor address
+    function userContractSponsorshipContribution(address from, address to, address contributor) public view returns (uint256) {
+        return userContractSponsorship[from][to].contributors[contributor];
+    }
+
     /// @notice Sponsor a specific contract operation
     /// @param to The contract address
     /// @param operation The 4-byte operation selector
@@ -123,6 +131,14 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
         emit OperationUnsponsored(to, operation, msg.sender, amount);
     }
 
+    /// @notice Get the contribution of a sponsor to an operation sponsorship
+    /// @param to The contract address being sponsored
+    /// @param operation The 4-byte operation selector
+    /// @param contributor The sponsor address
+    function operationSponsorshipContribution(address to, bytes4 operation, address contributor) public view returns(uint256) {
+        return operationSponsorship[to][operation].contributors[contributor];
+    }
+
     /// @notice Sponsor a contract calls
     /// @param to The contract address to be sponsored
     function sponsorContract(address to) public payable {
@@ -146,6 +162,13 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
         emit ContractUnsponsored(to, msg.sender, amount);
     }
 
+    /// @notice Get the contribution of a sponsor to a contract sponsorship
+    /// @param to The contract address being sponsored
+    /// @param contributor The sponsor address
+    function contractSponsorshipContribution(address to, address contributor) public view returns (uint256) {
+        return contractSponsorship[to].contributors[contributor];
+    }
+
     /// @notice Sponsor any transaction from a user
     /// @param from The user address to be sponsored
     function sponsorUser(address from) public payable {
@@ -167,6 +190,13 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     function unsponsorUser(address from, uint256 amount) public {
         _withdraw(userSponsorship[from], msg.sender, amount);
         emit UserUnsponsored(from, msg.sender, amount);
+    }
+
+    /// @notice Get the contribution of a sponsor to a user sponsorship
+    /// @param from The user address being sponsored
+    /// @param contributor The sponsor address
+    function userSponsorshipContribution(address from, address contributor) public view returns (uint256) {
+        return userSponsorship[from].contributors[contributor];
     }
 
     /// @notice Sponsor calls of a specific operation (method) of a contract, sent from a specific user
@@ -201,6 +231,15 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     function unsponsorUserOperation(address from, address to, bytes4 operation, uint256 amount) public {
         _withdraw(userOperationSponsorship[from][to][operation], msg.sender, amount);
         emit UserOperationUnsponsored(from, to, operation, msg.sender, amount);
+    }
+
+    /// @notice Get the contribution of a sponsor to a user-operation sponsorship
+    /// @param from The user address being sponsored
+    /// @param to The contract address being sponsored
+    /// @param operation The 4-byte operation selector
+    /// @param contributor The sponsor address
+    function userOperationSponsorshipContribution(address from, address to, bytes4 operation, address contributor) public view returns (uint256) {
+        return userOperationSponsorship[from][to][operation].contributors[contributor];
     }
 
     /// @notice Checks if a given fee can be covered by any available sponsorship
@@ -250,45 +289,6 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
             userOperationSponsorship[from][to][operation].available -= fee;
             return;
         }
-    }
-
-    /// @notice Get the contribution of a sponsor to a user-contract sponsorship
-    /// @param from The user address being sponsored
-    /// @param to The contract address being sponsored
-    /// @param contributor The sponsor address
-    function getUserContractSponsorshipContribution(address from, address to, address contributor) public view returns (uint256) {
-        return userContractSponsorship[from][to].contributors[contributor];
-    }
-
-    /// @notice Get the contribution of a sponsor to an operation sponsorship
-    /// @param to The contract address being sponsored
-    /// @param operation The 4-byte operation selector
-    /// @param contributor The sponsor address
-    function getOperationSponsorshipContribution(address to, bytes4 operation, address contributor) public view returns(uint256) {
-        return operationSponsorship[to][operation].contributors[contributor];
-    }
-
-    /// @notice Get the contribution of a sponsor to a contract sponsorship
-    /// @param to The contract address being sponsored
-    /// @param contributor The sponsor address
-    function getContractSponsorshipContribution(address to, address contributor) public view returns (uint256) {
-        return contractSponsorship[to].contributors[contributor];
-    }
-
-    /// @notice Get the contribution of a sponsor to a user sponsorship
-    /// @param from The user address being sponsored
-    /// @param contributor The sponsor address
-    function getUserSponsorshipContribution(address from, address contributor) public view returns (uint256) {
-        return userSponsorship[from].contributors[contributor];
-    }
-
-    /// @notice Get the contribution of a sponsor to a user-operation sponsorship
-    /// @param from The user address being sponsored
-    /// @param to The contract address being sponsored
-    /// @param operation The 4-byte operation selector
-    /// @param contributor The sponsor address
-    function getUserOperationSponsorshipContribution(address from, address to, bytes4 operation, address contributor) public view returns (uint256) {
-        return userOperationSponsorship[from][to][operation].contributors[contributor];
     }
 
     /// Override the upgrade authorization check to allow upgrades only from the owner.

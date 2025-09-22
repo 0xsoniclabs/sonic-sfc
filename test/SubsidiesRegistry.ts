@@ -35,19 +35,50 @@ describe('SubsidiesRegistry', () => {
     expect(await this.registry.owner()).to.equal(this.owner);
   });
 
-  it('Should succeed and sponsor user contract', async function () {
-    const from = await this.sponsor.getAddress();
-    const contract = ethers.Wallet.createRandom();
-    const amount = ethers.parseEther("1");
-    await expect(this.registry.connect(this.sponsor).sponsorUserContract(from, contract, {value: amount}))
-        .to.emit(this.registry, 'UserContractSponsored')
-        .withArgs(from, contract, this.sponsor, amount);
+  describe('UserContract', function () {
+      it('Should succeed and sponsor user contract', async function () {
+          const [sponsor1, sponsor2, sponsor3] = await ethers.getSigners();
+          const from = await this.sponsor.getAddress();
+          const contract = ethers.Wallet.createRandom();
+          const amount = ethers.parseEther("1");
 
-    const sponsorship = await this.registry.userContractSponsorship(from, contract);
-    expect(sponsorship.available).to.equal(amount);
-    expect(sponsorship.totalContributions).to.equal(amount);
-    expect(await this.registry.getUserContractSponsorshipContribution(from, contract, this.sponsor)).to.equal(amount);
+          let totalSponsored = 0n;
+          for (let i = 1n; i <= 3n; i++) {
+              for (const sponsor of [sponsor1, sponsor2, sponsor3]) {
+                  totalSponsored += amount;
+                  await expect(this.registry.connect(sponsor).sponsorUserContract(from, contract, {value: amount}))
+                      .to.emit(this.registry, 'UserContractSponsored')
+                      .withArgs(from, contract, sponsor, amount);
+                  const sponsorship = await this.registry.userContractSponsorship(from, contract);
+                  expect(sponsorship.available).to.equal(totalSponsored);
+                  expect(sponsorship.totalContributions).to.equal(totalSponsored);
+                  expect(await this.registry.userContractSponsorshipContribution(from, contract, sponsor)).to.equal(amount * i);
+              }
+          }
+      });
+
+      it('Should succeed and un-sponsor user contract', async function () {
+          const from = await this.sponsor.getAddress();
+          const contract = ethers.Wallet.createRandom();
+          const amount = ethers.parseEther("1");
+          await this.registry.connect(this.sponsor).sponsorUserContract(from, contract, {value: amount})
+
+          const unsponsorAmounts = [ethers.parseEther("0.1"), ethers.parseEther("0.2"),
+              ethers.parseEther("0.3"), ethers.parseEther("0.4")];
+          let totalUnsponsored = 0n;
+            for (const unsponsorAmount of unsponsorAmounts) {
+                totalUnsponsored += unsponsorAmount;
+                await expect(this.registry.connect(this.sponsor).unsponsorUserContract(from, contract, unsponsorAmount))
+                    .to.emit(this.registry, 'UserContractUnsponsored')
+                    .withArgs(from, contract, this.sponsor, unsponsorAmount);
+                const sponsorship = await this.registry.userContractSponsorship(from, contract);
+                expect(sponsorship.available).to.equal(amount - totalUnsponsored);
+                expect(sponsorship.totalContributions).to.equal(amount - totalUnsponsored);
+                expect(await this.registry.userContractSponsorshipContribution(from, contract, this.sponsor)).to.equal(amount - totalUnsponsored);
+            }
+      });
   });
+
 
   it('Should succeed and sponsor operation', async function () {
     const contract = ethers.Wallet.createRandom();
@@ -60,7 +91,7 @@ describe('SubsidiesRegistry', () => {
     const sponsorship = await this.registry.operationSponsorship(contract, operationId);
     expect(sponsorship.available).to.equal(amount);
     expect(sponsorship.totalContributions).to.equal(amount);
-    expect(await this.registry.getOperationSponsorshipContribution(contract, operationId, this.sponsor)).to.equal(amount);
+    expect(await this.registry.operationSponsorshipContribution(contract, operationId, this.sponsor)).to.equal(amount);
   });
 
   it('Should succeed and sponsor contract calls', async function () {
@@ -73,7 +104,7 @@ describe('SubsidiesRegistry', () => {
     const sponsorship = await this.registry.contractSponsorship(contract);
     expect(sponsorship.available).to.equal(amount);
     expect(sponsorship.totalContributions).to.equal(amount);
-    expect(await this.registry.getContractSponsorshipContribution(contract, this.sponsor)).to.equal(amount);
+    expect(await this.registry.contractSponsorshipContribution(contract, this.sponsor)).to.equal(amount);
   });
 
   it('Should succeed and sponsor user calls', async function () {
@@ -86,7 +117,7 @@ describe('SubsidiesRegistry', () => {
     const sponsorship = await this.registry.userSponsorship(from);
     expect(sponsorship.available).to.equal(amount);
     expect(sponsorship.totalContributions).to.equal(amount);
-    expect(await this.registry.getUserSponsorshipContribution(from, this.sponsor)).to.equal(amount);
+    expect(await this.registry.userSponsorshipContribution(from, this.sponsor)).to.equal(amount);
   });
 
   it('Should succeed and sponsor user operation', async function () {
@@ -101,6 +132,6 @@ describe('SubsidiesRegistry', () => {
     const sponsorship = await this.registry.userOperationSponsorship(from, contract, operationId);
     expect(sponsorship.available).to.equal(amount);
     expect(sponsorship.totalContributions).to.equal(amount);
-    expect(await this.registry.getUserOperationSponsorshipContribution(from, contract, operationId, this.sponsor)).to.equal(amount);
+    expect(await this.registry.userOperationSponsorshipContribution(from, contract, operationId, this.sponsor)).to.equal(amount);
   });
 });

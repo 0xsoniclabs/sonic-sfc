@@ -258,11 +258,12 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @notice Checks if a given fee can be covered by any available sponsorship
     /// @param from User address
     /// @param to Contract address
-    /// @param operation 4-byte operation selector
+    /// @param data The calldata of the transaction
     /// @param fee Fee amount in wei
     /// @return True if fee is covered, false otherwise
-    function isCovered(address from, address to, bytes4 operation, uint256 fee) public view returns(bool) {
+    function isCovered(address from, address to, bytes calldata data, uint256 fee) public view returns(bool) {
         if (userContractAvailable[from][to] >= fee) return true;
+        bytes4 operation = bytes4(data[0:4]);
         if (operationAvailable[to][operation] >= fee) return true;
         if (contractAvailable[to] >= fee) return true;
         if (userAvailable[from] >= fee) return true;
@@ -273,17 +274,18 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @notice Deduct a fee from a sponsorship - to be called by the Sonic node.
     /// @param from User address
     /// @param to Contract address
-    /// @param operation 4-byte operation selector
+    /// @param data The calldata of the transaction
     /// @param fee Fee amount in wei
-    function deductFees(address from, address to, bytes4 operation, uint256 fee) public {
+    function deductFees(address from, address to, bytes calldata data, uint256 fee) public {
         require(msg.sender == address(0), NotNode());
-        require(isCovered(from, to, operation, fee), NotSponsored());
+        require(isCovered(from, to, data, fee), NotSponsored());
 
         sfc.burnNativeTokens{value: fee}();
         if (userContractAvailable[from][to] >= fee) {
             userContractAvailable[from][to] -= fee;
             return;
         }
+        bytes4 operation = bytes4(data[0:4]);
         if (operationAvailable[to][operation] >= fee) {
             operationAvailable[to][operation] -= fee;
             return;

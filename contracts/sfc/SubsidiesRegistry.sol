@@ -311,9 +311,10 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
         require(amount != 0, NothingToWithdraw());
         require(tx.gasprice != 0, NotAllowedInSponsoredTx());
 
+        uint256 toSubstract = amount * sponsorship.totalContributions / sponsorship.available;
         sponsorship.available -= amount;
-        sponsorship.totalContributions -= amount;
-        sponsorship.contributors[sponsor] -= amount;
+        sponsorship.contributors[sponsor] -= toSubstract;
+        sponsorship.totalContributions -= toSubstract;
 
         (bool success, ) = sponsor.call{value: amount}("");
         require(success, TransferFailed());

@@ -113,7 +113,7 @@ describe('SubsidiesRegistry', () => {
       expect(withdrawableA).to.equal(ethers.parseEther('90'));
       await this.registry.connect(sponsorA).unsponsorUserContract(from, contract, withdrawableA);
       expect(await this.registry.userContractSponsorshipContribution(from, contract, sponsorA)).to.equal(
-        ethers.parseEther('10'),
+        ethers.parseEther('0'),
       );
 
       // SponsorB should be able to withdraw max 180 (200 - 10% of 200)
@@ -121,7 +121,7 @@ describe('SubsidiesRegistry', () => {
       expect(withdrawableB).to.equal(ethers.parseEther('180'));
       await this.registry.connect(sponsorB).unsponsorUserContract(from, contract, withdrawableB);
       expect(await this.registry.userContractSponsorshipContribution(from, contract, sponsorB)).to.equal(
-        ethers.parseEther('20'),
+        ethers.parseEther('0'),
       );
     });
   });

@@ -44,3 +44,5 @@ jobs:
 
       - name: Run tests
         run: npm run test
+        env:
+          PRIVATE_KEY: "0x0000000000000000000000000000000000000000000000000000000000000000"

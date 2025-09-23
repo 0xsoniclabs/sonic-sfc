@@ -45,6 +45,7 @@
     "typescript-eslint": "^8.8.0"
   },
   "dependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
     "@openzeppelin/contracts": "^5.1.0",
     "@openzeppelin/contracts-upgradeable": "^5.1.0",
     "dotenv": "^16.0.3"

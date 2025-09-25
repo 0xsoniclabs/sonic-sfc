@@ -14,7 +14,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
 
     ISFC private constant SFC = ISFC(0xFC00FACE00000000000000000000000000000000);
 
-    mapping(bytes32 fundId => Fund fund) public sponsorships;
+    mapping(bytes32 fundId => Fund fund) private sponsorships;
 
     event Sponsored(bytes32 indexed fundId, address indexed sponsor, uint256 amount);
     event Withdrawn(bytes32 indexed fundId, address indexed sponsor, uint256 amount);
@@ -25,6 +25,8 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     error TransferFailed();
     error NotAllowedInSponsoredTx();
     error ZeroFundId();
+    error NoFundsAttached();
+    error NotInitialized();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -40,13 +42,13 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @notice Account sponsorships cover all transactions sent from a specific account. All sponsorship requests from this account will be covered.
     /// @param from The sender address to be sponsored
     function accountSponsorshipFundId(address from) public pure returns (bytes32) {
-        return bytes32(abi.encodePacked("a", from));
+        return keccak256(abi.encodePacked("a", from));
     }
 
     /// @notice Contract sponsorships cover all transactions sent to a specific contract. All sponsorship requests for transactions targeting this contract will be covered.
     /// @param to The contract address to be sponsored
     function contractSponsorshipFundId(address to) public pure returns (bytes32) {
-        return bytes32(abi.encodePacked("c", to));
+        return keccak256(abi.encodePacked("c", to));
     }
 
     /// @notice Call sponsorships cover all transactions calling a specific function on a specific contract.
@@ -61,7 +63,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
             return bytes32(0);
         }
         bytes4 selector = bytes4(callData[:4]);
-        return bytes32(abi.encodePacked("o", from, to, selector));
+        return keccak256(abi.encodePacked("o", from, to, selector));
     }
 
     /// @notice Account-Operation sponsorships cover all transactions calling a specific function on a specific contract by the given account.
@@ -79,7 +81,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
             return bytes32(0);
         }
         bytes4 selector = bytes4(callData[:4]);
-        return bytes32(abi.encodePacked("ao", from, to, selector));
+        return keccak256(abi.encodePacked("ao", from, to, selector));
     }
 
     /// @notice Approval sponsorships cover all ERC20 approve calls from a specific account to a specific token contract and spender with a non-zero approval amount.
@@ -104,14 +106,14 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
             // we do not sponsor zero-amount approvals
             return bytes32(0);
         }
-        return bytes32(abi.encodePacked(uint32(0x095ea7b3), from, to, spender));
+        return keccak256(abi.encodePacked(bytes4(0x095ea7b3), from, to, spender));
     }
 
     /// @notice Bootstrap sponsorships cover the first few transactions from a new account. This allows new users to get started without having to acquire native tokens first.
     /// @param nonce The sender account nonce
     function bootstrapSponsorshipFund(uint256 nonce) public pure returns (bytes32) {
         if (nonce < 3) {
-            return bytes32(abi.encodePacked("b"));
+            return keccak256(abi.encodePacked("b"));
         }
         return bytes32(0);
     }
@@ -159,11 +161,13 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
         return bytes32(0);
     }
 
-    /// @notice Deduct a fee from a sponsorship - to be called by the Sonic node.
-    /// @param fundId The fund to deduct from
-    /// @param fee The fee amount to deduct in wei
+    /// @notice Deduct transaction fees from a sponsorship fund.
+    /// @dev This function is intended to be called only by the Sonic node.
+    ///      Deducts the fee from the fund balance and burns the native tokens through SFC.
+    /// @param fundId The unique identifier of the sponsorship fund.
+    /// @param fee The fee amount to deduct (in wei).
     function deductFees(bytes32 fundId, uint256 fee) public {
-        require(msg.sender == address(0), NotNode());
+        require(msg.sender == address(0), NotNode()); // must be called in an internal transaction
         require(fundId != bytes32(0), ZeroFundId());
         Fund storage fund = sponsorships[fundId];
         require(fund.available >= fee, NotSponsored());
@@ -171,20 +175,29 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
         SFC.burnNativeTokens{value: fee}();
     }
 
-    /// @notice Insert funds into a fund
-    /// @param fundId The fund to be sponsored
+    /// @notice Insert funds into a specified sponsorship fund.
+    /// @dev Increases the fund's available balance, the sender's contribution record,
+    ///      and the total contributions counter.
+    /// @param fundId The unique identifier of the sponsorship fund.
     function sponsor(bytes32 fundId) public payable {
         require(fundId != bytes32(0), ZeroFundId());
+        require(msg.value > 0, NoFundsAttached());
+        require(owner() != address(0), NotInitialized()); // avoid paying into implementation contract
+
         Fund storage fund = sponsorships[fundId];
         fund.available += msg.value;
         fund.contributors[msg.sender] += msg.value;
         fund.totalContributions += msg.value;
+
         emit Sponsored(fundId, msg.sender, msg.value);
     }
 
-    /// @notice Withdraw inserted funds from a fund
-    /// @param fundId The fund to be withdrawn
-    /// @param amount The funds amount to withdraw in wei
+    /// @notice Withdraw funds from a sponsorship fund.
+    /// @dev A sponsor can withdraw up to their proportional share of the fund's available balance.
+    ///      Withdrawals are blocked in sponsored transactions to prevent abuse.
+    /// @param fundId The unique identifier of the sponsorship fund.
+    /// @param amount The requested withdrawal amount (in wei). If larger than the maximum allowed,
+    ///        it will be capped to the sponsor's withdrawable share.
     function withdraw(bytes32 fundId, uint256 amount) external {
         require(fundId != bytes32(0), ZeroFundId());
         Fund storage fund = sponsorships[fundId];
@@ -216,10 +229,32 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// @param fund The fund to withdrawn
     /// @param _sponsor The withdrawing sponsor
     function _availableToWithdraw(Fund storage fund, address _sponsor) private view returns (uint256) {
+        if (fund.totalContributions == 0) {
+            return 0;
+        }
         return (fund.available * fund.contributors[_sponsor]) / fund.totalContributions;
     }
 
-    function sponsorshipContribution(bytes32 fundId, address _sponsor) external view returns (uint256) {
+    /// @notice Get the currently available funds for sponsorship under the given fund.
+    /// @param fundId The unique identifier of the sponsorship fund.
+    /// @return The amount of funds (in wei) currently available to cover sponsored transactions.
+    function getAvailableFunds(bytes32 fundId) external view returns (uint256) {
+        return sponsorships[fundId].available;
+    }
+
+    /// @notice Get the total amount of contributions ever made to a given sponsorship fund.
+    /// @dev This value increases when sponsors deposit, and decreases proportionally when withdrawals happen.
+    /// @param fundId The unique identifier of the sponsorship fund.
+    /// @return The total contributed amount (in wei) for the specified fund.
+    function getTotalContributions(bytes32 fundId) external view returns (uint256) {
+        return sponsorships[fundId].totalContributions;
+    }
+
+    /// @notice Get the total amount contributed by a specific sponsor to a given fund.
+    /// @param fundId The unique identifier of the sponsorship fund.
+    /// @param _sponsor The address of the sponsor whose contribution is being queried.
+    /// @return The amount (in wei) that the sponsor has contributed to the fund.
+    function getSponsorContribution(bytes32 fundId, address _sponsor) external view returns (uint256) {
         return sponsorships[fundId].contributors[_sponsor];
     }
 

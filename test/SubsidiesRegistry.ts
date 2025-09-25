@@ -64,8 +64,8 @@ describe('SubsidiesRegistry', () => {
     await this.registry.connect(sponsorA).sponsor(fundId, { value: 100 });
     // Sponsor B deposits 200
     await this.registry.connect(sponsorB).sponsor(fundId, { value: 200 });
-    expect(await this.registry.sponsorshipContribution(fundId, sponsorA)).to.equal(100);
-    expect(await this.registry.sponsorshipContribution(fundId, sponsorB)).to.equal(200);
+    expect(await this.registry.getSponsorContribution(fundId, sponsorA)).to.equal(100);
+    expect(await this.registry.getSponsorContribution(fundId, sponsorB)).to.equal(200);
 
     await this.registry.connect(this.node).deductFees(fundId, 30);
 
@@ -73,13 +73,13 @@ describe('SubsidiesRegistry', () => {
     const withdrawableA = await this.registry.availableToWithdraw(fundId, sponsorA);
     expect(withdrawableA).to.equal(90);
     await this.registry.connect(sponsorA).withdraw(fundId, withdrawableA);
-    expect(await this.registry.sponsorshipContribution(fundId, sponsorA)).to.equal(0);
+    expect(await this.registry.getSponsorContribution(fundId, sponsorA)).to.equal(0);
 
     // SponsorB should be able to withdraw max 180 (200 - 10% of 200)
     const withdrawableB = await this.registry.availableToWithdraw(fundId, sponsorB);
     expect(withdrawableB).to.equal(180);
     await this.registry.connect(sponsorB).withdraw(fundId, withdrawableB);
-    expect(await this.registry.sponsorshipContribution(fundId, sponsorB)).to.equal(0);
+    expect(await this.registry.getSponsorContribution(fundId, sponsorB)).to.equal(0);
   });
 
   it('Calculates fundId for contract sponsorship', async function () {

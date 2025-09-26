@@ -87,7 +87,7 @@ describe('SubsidiesRegistry', () => {
     const to = ethers.Wallet.createRandom();
     const expectedFundId = await this.registry.contractSponsorshipFundId(to);
     await this.registry.sponsor(expectedFundId, { value: 10 });
-    const choosenFundId = await this.registry.chooseFund(from, to, 1, '0x', 5);
+    const choosenFundId = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
     expect(choosenFundId).to.equal(expectedFundId);
   });
 });

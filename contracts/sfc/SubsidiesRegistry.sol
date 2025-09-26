@@ -40,35 +40,31 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     }
 
     /// @notice Account sponsorships cover all transactions sent from a specific account. All sponsorship requests from this account will be covered.
-    /// @param from The sender address to be sponsored
+    /// @param from The sender of the transaction
     function accountSponsorshipFundId(address from) public pure returns (bytes32) {
         return keccak256(abi.encodePacked("a", from));
     }
 
     /// @notice Contract sponsorships cover all transactions sent to a specific contract. All sponsorship requests for transactions targeting this contract will be covered.
-    /// @param to The contract address to be sponsored
+    /// @param to The recipient of the transaction (the contract address)
     function contractSponsorshipFundId(address to) public pure returns (bytes32) {
         return keccak256(abi.encodePacked("c", to));
     }
 
     /// @notice Call sponsorships cover all transactions calling a specific function on a specific contract.
-    function operationSponsorshipFundId(
-        address from,
-        address to,
-        bytes calldata callData
-    ) public pure returns (bytes32) {
+    function operationSponsorshipFundId(address to, bytes calldata callData) public pure returns (bytes32) {
         // Ignore create contract calls (to is zero address) and calls with too short
         // call data (less than 4 bytes, not covering the function selector).
         if (to == address(0) || callData.length < 4) {
             return bytes32(0);
         }
         bytes4 selector = bytes4(callData[:4]);
-        return keccak256(abi.encodePacked("o", from, to, selector));
+        return keccak256(abi.encodePacked("o", to, selector));
     }
 
     /// @notice Account-Operation sponsorships cover all transactions calling a specific function on a specific contract by the given account.
-    /// @param from The sender address to be sponsored
-    /// @param to The contract address to be sponsored
+    /// @param from The sender of the transaction
+    /// @param to The recipient of the transaction (the contract address)
     /// @param callData The contract call/function signature to be sponsored
     function accountOperationSponsorshipFundId(
         address from,
@@ -84,15 +80,10 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
         return keccak256(abi.encodePacked("ao", from, to, selector));
     }
 
-    /// @notice Approval sponsorships cover all ERC20 approve calls from a specific account to a specific token contract and spender with a non-zero approval amount.
-    /// @param from The sender address to be sponsored
-    /// @param to The contract address to be sponsored
+    /// @notice Approval sponsorships cover all ERC20 approve calls giving access to a specific spender.
+    /// @param to The recipient of the transaction
     /// @param callData The contract call/function signature to be sponsored
-    function approvalSponsorshipFundId(
-        address from,
-        address to,
-        bytes calldata callData
-    ) public pure returns (bytes32) {
+    function approvalSponsorshipFundId(address to, bytes calldata callData) public pure returns (bytes32) {
         if (to == address(0) || callData.length != 2 * 32 + 4) {
             return bytes32(0);
         }
@@ -106,12 +97,13 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
             // we do not sponsor zero-amount approvals
             return bytes32(0);
         }
-        return keccak256(abi.encodePacked(bytes4(0x095ea7b3), from, to, spender));
+        return keccak256(abi.encodePacked("approval", to, spender));
     }
 
     /// @notice Bootstrap sponsorships cover the first few transactions from a new account. This allows new users to get started without having to acquire native tokens first.
-    /// @param nonce The sender account nonce
+    /// @param nonce The transaction nonce
     function bootstrapSponsorshipFund(uint256 nonce) public pure returns (bytes32) {
+        // TODO: check that the user balance is below the required fee?
         if (nonce < 3) {
             return keccak256(abi.encodePacked("b"));
         }
@@ -120,7 +112,8 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
 
     /// @notice Check if a transaction is covered by Gas Subsidies and return the fund to sponsor it.
     /// @param from Transaction sender
-    /// @param to Transaction recipient (typically the called contract)
+    /// @param to Transaction recipient (typically the called contract, zero for contract creation calls)
+    /// @param /*value*/ Transaction value (the money amount being sent to the recipient)
     /// @param nonce Transaction nonce
     /// @param callData Transaction call data
     /// @param fee The transaction fee to be covered
@@ -128,20 +121,25 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     function chooseFund(
         address from,
         address to,
+        uint256 /*value*/,
         uint256 nonce,
         bytes calldata callData,
         uint256 fee
     ) public view returns (bytes32 fundId) {
         // Check all possible sponsorship funds in order of precedence.
-        fundId = approvalSponsorshipFundId(from, to, callData);
-        if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
-            return fundId;
-        }
         fundId = accountOperationSponsorshipFundId(from, to, callData);
         if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
             return fundId;
         }
-        fundId = accountSponsorshipFundId(from);
+        fundId = approvalSponsorshipFundId(to, callData);
+        if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
+            return fundId;
+        }
+        fundId = operationSponsorshipFundId(to, callData);
+        if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
+            return fundId;
+        }
+        fundId = bootstrapSponsorshipFund(nonce);
         if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
             return fundId;
         }
@@ -149,11 +147,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
         if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
             return fundId;
         }
-        fundId = operationSponsorshipFundId(from, to, callData);
-        if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
-            return fundId;
-        }
-        fundId = bootstrapSponsorshipFund(nonce);
+        fundId = accountSponsorshipFundId(from);
         if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
             return fundId;
         }

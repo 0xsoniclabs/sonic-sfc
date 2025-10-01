@@ -16,6 +16,12 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
 
     mapping(bytes32 fundId => Fund fund) private sponsorships;
 
+    /// @notice GasLimit to be used for deductFees() calls.
+    uint256 public chooseFundGasLimit;
+
+    /// @notice GasLimit to be used for deductFees() transactions.
+    uint256 public deductFeesGasLimit;
+
     event Sponsored(bytes32 indexed fundId, address indexed sponsor, uint256 amount);
     event Withdrawn(bytes32 indexed fundId, address indexed sponsor, uint256 amount);
 
@@ -37,6 +43,8 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     function initialize() external initializer {
         __Ownable_init(SFC.owner());
         __UUPSUpgradeable_init();
+        chooseFundGasLimit = 100_000;
+        deductFeesGasLimit = 100_000;
     }
 
     /// @notice Account sponsorships cover all transactions sent from a specific account. All sponsorship requests from this account will be covered.
@@ -255,4 +263,16 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     /// Override the upgrade authorization check to allow upgrades only from the owner.
     // solhint-disable-next-line no-empty-blocks
     function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    /// @notice Set GasLimit to be used for chooseFund() calls.
+    /// @param newLimit The new GasLimit value.
+    function setChooseFundGasLimit(uint256 newLimit) public onlyOwner {
+        chooseFundGasLimit = newLimit;
+    }
+
+    /// @notice Set GasLimit to be used for deductFees() internal transactions.
+    /// @param newLimit The new GasLimit value.
+    function setDeductFeesGasLimit(uint256 newLimit) public onlyOwner {
+        deductFeesGasLimit = newLimit;
+    }
 }

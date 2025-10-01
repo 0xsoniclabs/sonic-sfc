@@ -25,11 +25,19 @@ describe('SubsidiesRegistry', () => {
       value: ethers.parseEther('10'),
     });
 
+    const cfg = await registry.getGasConfig();
+    const config = {
+      chooseFundGasLimit: cfg[0],
+      deductFeesGasLimit: cfg[1],
+      overheadCharge: cfg[2],
+    };
+
     return {
       owner,
       sponsor,
       registry,
       node,
+      config,
     };
   };
 
@@ -135,5 +143,36 @@ describe('SubsidiesRegistry', () => {
 
     await this.registry.connect(this.owner).setChooseFundGasLimit(123);
     await this.registry.connect(this.owner).setDeductFeesGasLimit(123);
+  });
+
+  describe('getGasConfig', async function () {
+    it('getGasConfig fits into getGasConfigCosts', async function () {
+      const getGasConfigLimit =
+        this.config.overheadCharge - this.config.chooseFundGasLimit - this.config.deductFeesGasLimit;
+      await this.registry.getGasConfig({ gasLimit: getGasConfigLimit });
+    });
+
+    it('chooseFund fits into chooseFundGasLimit', async function () {
+      const from = ethers.Wallet.createRandom();
+      const to = ethers.Wallet.createRandom();
+      await this.registry
+        .connect(this.node)
+        .chooseFund(
+          from,
+          to,
+          5,
+          1,
+          '0x095ea7b300000000000000000000000011112222333344445555666677778888999900000000000000000000000000000000000000000000000000056bc75e2d63100000',
+          5,
+          { gasLimit: this.config.chooseFundGasLimit },
+        );
+    });
+
+    it('deductFees fits into deductFeesGasLimit', async function () {
+      const fundId = '0x0000000000000000000000000000000000000000000000000000000000000123';
+      await this.registry.connect(this.sponsor).sponsor(fundId, { value: 100 });
+
+      await this.registry.connect(this.node).deductFees(fundId, 90, { gasLimit: this.config.deductFeesGasLimit });
+    });
   });
 });

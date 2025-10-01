@@ -16,6 +16,9 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
 
     mapping(bytes32 fundId => Fund fund) private sponsorships;
 
+    /// @notice The cost of getGasConfig() call in the gas units.
+    uint256 public getGasConfigCosts;
+
     /// @notice GasLimit to be used for deductFees() calls.
     uint256 public chooseFundGasLimit;
 
@@ -43,6 +46,7 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     function initialize() external initializer {
         __Ownable_init(SFC.owner());
         __UUPSUpgradeable_init();
+        getGasConfigCosts = 40_000;
         chooseFundGasLimit = 100_000;
         deductFeesGasLimit = 100_000;
     }
@@ -260,19 +264,37 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
         return sponsorships[fundId].contributors[_sponsor];
     }
 
-    /// Override the upgrade authorization check to allow upgrades only from the owner.
-    // solhint-disable-next-line no-empty-blocks
-    function _authorizeUpgrade(address) internal override onlyOwner {}
+    /// @notice Get gas config for Sonic-internal calls.
+    function getGasConfig()
+        external
+        view
+        returns (uint256 _chooseFundGasLimit, uint256 _deductFeesGasLimit, uint256 _overheadCharge)
+    {
+        _chooseFundGasLimit = chooseFundGasLimit;
+        _deductFeesGasLimit = deductFeesGasLimit;
+        _overheadCharge = _chooseFundGasLimit + _deductFeesGasLimit + getGasConfigCosts;
+        return (_chooseFundGasLimit, _deductFeesGasLimit, _overheadCharge);
+    }
+
+    /// @notice Set gas costs of a getGasConfig call.
+    /// @param newCosts The new gas costs of the call.
+    function setGetGasConfigCosts(uint256 newCosts) external onlyOwner {
+        getGasConfigCosts = newCosts;
+    }
 
     /// @notice Set GasLimit to be used for chooseFund() calls.
     /// @param newLimit The new GasLimit value.
-    function setChooseFundGasLimit(uint256 newLimit) public onlyOwner {
+    function setChooseFundGasLimit(uint256 newLimit) external onlyOwner {
         chooseFundGasLimit = newLimit;
     }
 
     /// @notice Set GasLimit to be used for deductFees() internal transactions.
     /// @param newLimit The new GasLimit value.
-    function setDeductFeesGasLimit(uint256 newLimit) public onlyOwner {
+    function setDeductFeesGasLimit(uint256 newLimit) external onlyOwner {
         deductFeesGasLimit = newLimit;
     }
+
+    /// Override the upgrade authorization check to allow upgrades only from the owner.
+    // solhint-disable-next-line no-empty-blocks
+    function _authorizeUpgrade(address) internal override onlyOwner {}
 }

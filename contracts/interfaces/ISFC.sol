@@ -157,7 +157,7 @@ interface ISFC {
 
     function updateTreasuryAddress(address v) external;
 
-    function burnFTM(uint256 amount) external;
+    function burnNativeTokens() external payable;
 
     function sealEpoch(
         uint256[] calldata offlineTime,

@@ -281,11 +281,6 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
         return (_chooseFundGasLimit, _deductFeesGasLimit, _overheadCharge);
     }
 
-    /// @notice The cost of getGasConfig() call in the gas units.
-    function getGasConfigCosts() public pure returns (uint256) {
-        return GET_GAS_CONFIG_COST;
-    }
-
     /// @notice Set GasLimit to be used for chooseFund() calls.
     /// @param newLimit The new GasLimit value.
     function setChooseFundGasLimit(uint256 newLimit) external onlyOwner {

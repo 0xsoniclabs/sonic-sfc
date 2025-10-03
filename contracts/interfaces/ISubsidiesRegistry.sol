@@ -37,7 +37,4 @@ interface ISubsidiesRegistry {
         external
         view
         returns (uint256 _chooseFundGasLimit, uint256 _deductFeesGasLimit, uint256 _overheadCharge);
-
-    /// @notice The cost of getGasConfig() call in the gas units.
-    function getGasConfigCosts() external view returns (uint256);
 }

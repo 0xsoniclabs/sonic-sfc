@@ -146,10 +146,8 @@ describe('SubsidiesRegistry', () => {
   });
 
   describe('getGasConfig', async function () {
-    it('getGasConfig fits into getGasConfigCosts', async function () {
-      const getGasConfigLimit =
-        this.config.overheadCharge - this.config.chooseFundGasLimit - this.config.deductFeesGasLimit;
-      await this.registry.getGasConfig({ gasLimit: getGasConfigLimit });
+    it('getGasConfig fits into GET_GAS_CONFIG_COST', async function () {
+      await this.registry.getGasConfig({ gasLimit: 50_000 });
     });
 
     it('chooseFund fits into chooseFundGasLimit', async function () {

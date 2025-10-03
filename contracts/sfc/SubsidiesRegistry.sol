@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.27;
 
-import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {ISFC} from "../interfaces/ISFC.sol";
+import {ISubsidiesRegistry} from "../interfaces/ISubsidiesRegistry.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
-contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
+/**
+ * @title Subsidies Registry Interface
+ * @notice Registry managing transaction sponsoring funds.
+ * @custom:security-contact security@fantom.foundation
+ */
+contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgradeable {
     struct Fund {
         uint256 available;
         uint256 totalContributions;
@@ -14,10 +20,10 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
 
     ISFC private constant SFC = ISFC(0xFC00FACE00000000000000000000000000000000);
 
-    mapping(bytes32 fundId => Fund fund) private sponsorships;
-
     /// @notice The cost of getGasConfig() call in the gas units.
-    uint256 public getGasConfigCosts;
+    uint256 private constant GET_GAS_CONFIG_COST = 50_000;
+
+    mapping(bytes32 fundId => Fund fund) private sponsorships;
 
     /// @notice GasLimit to be used for deductFees() calls.
     uint256 public chooseFundGasLimit;
@@ -46,7 +52,6 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     function initialize() external initializer {
         __Ownable_init(SFC.owner());
         __UUPSUpgradeable_init();
-        getGasConfigCosts = 40_000;
         chooseFundGasLimit = 100_000;
         deductFeesGasLimit = 100_000;
     }
@@ -272,14 +277,13 @@ contract SubsidiesRegistry is OwnableUpgradeable, UUPSUpgradeable {
     {
         _chooseFundGasLimit = chooseFundGasLimit;
         _deductFeesGasLimit = deductFeesGasLimit;
-        _overheadCharge = _chooseFundGasLimit + _deductFeesGasLimit + getGasConfigCosts;
+        _overheadCharge = _chooseFundGasLimit + _deductFeesGasLimit + GET_GAS_CONFIG_COST;
         return (_chooseFundGasLimit, _deductFeesGasLimit, _overheadCharge);
     }
 
-    /// @notice Set gas costs of a getGasConfig call.
-    /// @param newCosts The new gas costs of the call.
-    function setGetGasConfigCosts(uint256 newCosts) external onlyOwner {
-        getGasConfigCosts = newCosts;
+    /// @notice The cost of getGasConfig() call in the gas units.
+    function getGasConfigCosts() public pure returns (uint256) {
+        return GET_GAS_CONFIG_COST;
     }
 
     /// @notice Set GasLimit to be used for chooseFund() calls.

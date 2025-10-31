@@ -2,6 +2,8 @@ import { ethers, upgrades } from 'hardhat';
 import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
 import { expect } from 'chai';
 
+const noFundId = '0x0000000000000000000000000000000000000000000000000000000000000000';
+
 describe('SubsidiesRegistry', () => {
   const fixture = async () => {
     const [owner, sponsor] = await ethers.getSigners();
@@ -12,6 +14,8 @@ describe('SubsidiesRegistry', () => {
       '0xFC00FACE00000000000000000000000000000000',
       await stubSfc.getDeployedCode(),
     ]);
+
+    const erc20 = await ethers.deployContract('TestingERC20', []);
 
     const registry = await upgrades.deployProxy(await ethers.getContractFactory('SubsidiesRegistry'), [], {
       kind: 'uups',
@@ -38,6 +42,7 @@ describe('SubsidiesRegistry', () => {
       registry,
       node,
       config,
+      erc20,
     };
   };
 
@@ -95,8 +100,7 @@ describe('SubsidiesRegistry', () => {
       const from = ethers.Wallet.createRandom();
       const to = ethers.Wallet.createRandom();
       const choosenFundId = await this.registry.connect(this.node).chooseFund(from, to, 5, 1, '0x', 5);
-      const expectedFundId = '0x0000000000000000000000000000000000000000000000000000000000000000';
-      expect(choosenFundId).to.equal(expectedFundId);
+      expect(choosenFundId).to.equal(noFundId);
     });
 
     it('Calculates fundId for contract sponsorship', async function () {
@@ -106,6 +110,60 @@ describe('SubsidiesRegistry', () => {
       await this.registry.sponsor(expectedFundId, { value: 10 });
       const choosenFundId = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
       expect(choosenFundId).to.equal(expectedFundId);
+    });
+
+    describe('Approval sponsorship', async function () {
+      it('Calculates fundId for valid approval', async function () {
+        const from = ethers.Wallet.createRandom();
+        const spender = ethers.Wallet.createRandom();
+        await this.erc20.mint(from, 12); // from has non-zero balance
+
+        const approveInterface = new ethers.Interface(['function approve(address spender, uint256 amount)']);
+        const calldata = approveInterface.encodeFunctionData('approve', [spender.address, 10_000]);
+
+        const expectedFundId = await this.registry.approvalSponsorshipFundId(from, this.erc20, calldata);
+        expect(expectedFundId).to.not.equal(noFundId);
+
+        await this.registry.sponsor(expectedFundId, { value: 10 });
+        const choosenFundId = await this.registry.chooseFund(from, this.erc20, 0, 1, calldata, 5);
+        expect(choosenFundId).to.equal(expectedFundId);
+      });
+
+      it('Does not revert for non-ERC20 target', async function () {
+        const from = ethers.Wallet.createRandom();
+        const spender = ethers.Wallet.createRandom();
+        const to = ethers.Wallet.createRandom(); // target is not an ERC20
+
+        const approveInterface = new ethers.Interface(['function approve(address spender, uint256 amount)']);
+        const calldata = approveInterface.encodeFunctionData('approve', [spender.address, 10_000]);
+
+        const choosenFundId = await this.registry.chooseFund(from, to, 0, 1, calldata, 5);
+        expect(choosenFundId).to.equal(noFundId);
+      });
+
+      it('Rejects zero balance from', async function () {
+        const from = ethers.Wallet.createRandom();
+        const spender = ethers.Wallet.createRandom();
+
+        const approveInterface = new ethers.Interface(['function approve(address spender, uint256 amount)']);
+        const calldata = approveInterface.encodeFunctionData('approve', [spender.address, 10_000]);
+
+        const expectedFundId = await this.registry.approvalSponsorshipFundId(from, this.erc20, calldata);
+        expect(expectedFundId).to.equal(noFundId);
+      });
+
+      it('Rejects setting allowance when some allowance already set', async function () {
+        const [from] = await ethers.getSigners();
+        const spender = ethers.Wallet.createRandom();
+        await this.erc20.mint(from, 12); // from has non-zero balance
+        await this.erc20.connect(from).approve(spender, 3); // spender already have an allowance
+
+        const approveInterface = new ethers.Interface(['function approve(address spender, uint256 amount)']);
+        const calldata = approveInterface.encodeFunctionData('approve', [spender.address, 10_000]);
+
+        const expectedFundId = await this.registry.approvalSponsorshipFundId(from, this.erc20, calldata);
+        expect(expectedFundId).to.equal(noFundId);
+      });
     });
   });
 
@@ -146,31 +204,29 @@ describe('SubsidiesRegistry', () => {
   });
 
   describe('getGasConfig', async function () {
-    it('getGasConfig fits into GET_GAS_CONFIG_COST', async function () {
-      await this.registry.getGasConfig({ gasLimit: 50_000 });
+    it('getGasConfig fits into 8/10 of GET_GAS_CONFIG_COST', async function () {
+      await this.registry.getGasConfig({ gasLimit: (50_000 / 10) * 8 });
     });
 
-    it('chooseFund fits into chooseFundGasLimit', async function () {
+    it('chooseFund fits into 8/10 of chooseFundGasLimit', async function () {
       const from = ethers.Wallet.createRandom();
-      const to = ethers.Wallet.createRandom();
+      const spender = ethers.Wallet.createRandom();
+      await this.erc20.mint(from, 12); // from has non-zero balance
+      const approveInterface = new ethers.Interface(['function approve(address spender, uint256 amount)']);
+      const calldata = approveInterface.encodeFunctionData('approve', [spender.address, 10_000]);
+
       await this.registry
         .connect(this.node)
-        .chooseFund(
-          from,
-          to,
-          5,
-          1,
-          '0x095ea7b300000000000000000000000011112222333344445555666677778888999900000000000000000000000000000000000000000000000000056bc75e2d63100000',
-          5,
-          { gasLimit: this.config.chooseFundGasLimit },
-        );
+        .chooseFund(from, this.erc20, 5, 1, calldata, 5, { gasLimit: (this.config.chooseFundGasLimit / 10n) * 8n });
     });
 
-    it('deductFees fits into deductFeesGasLimit', async function () {
+    it('deductFees fits into 8/10 of deductFeesGasLimit', async function () {
       const fundId = '0x0000000000000000000000000000000000000000000000000000000000000123';
       await this.registry.connect(this.sponsor).sponsor(fundId, { value: 100 });
 
-      await this.registry.connect(this.node).deductFees(fundId, 90, { gasLimit: this.config.deductFeesGasLimit });
+      await this.registry
+        .connect(this.node)
+        .deductFees(fundId, 90, { gasLimit: (this.config.deductFeesGasLimit / 10n) * 8n });
     });
   });
 });

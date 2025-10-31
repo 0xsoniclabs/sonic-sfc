@@ -5,6 +5,7 @@ import {ISFC} from "../interfaces/ISFC.sol";
 import {ISubsidiesRegistry} from "../interfaces/ISubsidiesRegistry.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title Subsidies Registry Interface
@@ -100,7 +101,11 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
     /// @notice Approval sponsorships cover all ERC20 approve calls giving access to a specific spender.
     /// @param to The recipient of the transaction
     /// @param callData The contract call/function signature to be sponsored
-    function approvalSponsorshipFundId(address to, bytes calldata callData) public pure returns (bytes32) {
+    function approvalSponsorshipFundId(
+        address from,
+        address to,
+        bytes calldata callData
+    ) public view returns (bytes32) {
         if (to == address(0) || callData.length != 2 * 32 + 4) {
             return bytes32(0);
         }
@@ -109,10 +114,36 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
             // ERC20 approve
             return bytes32(0);
         }
+        // approval has to be for a non-zero value
         (address spender, uint256 value) = abi.decode(callData[4:], (address, uint256));
-        if (value < 1) {
-            // we do not sponsor zero-amount approvals
+        if (value == 0) {
             return bytes32(0);
+        }
+        // user have to use the whole allowance before another approve is sponsored
+        {
+            (bool allowanceOk, bytes memory allowanceOutput) = to.staticcall(
+                abi.encodeWithSelector(IERC20.allowance.selector, from, spender)
+            );
+            if (!allowanceOk || allowanceOutput.length < 32) {
+                return bytes32(0);
+            }
+            uint256 currentAllowance = abi.decode(allowanceOutput, (uint256));
+            if (currentAllowance != 0) {
+                return bytes32(0);
+            }
+        }
+        // user's balance have to be non-zero for an approval to be sponsored
+        {
+            (bool balanceOk, bytes memory balanceOutput) = to.staticcall(
+                abi.encodeWithSelector(IERC20.balanceOf.selector, from)
+            );
+            if (!balanceOk || balanceOutput.length < 32) {
+                return bytes32(0);
+            }
+            uint256 balance = abi.decode(balanceOutput, (uint256));
+            if (balance == 0) {
+                return bytes32(0);
+            }
         }
         return keccak256(abi.encodePacked("approval", to, spender));
     }
@@ -148,7 +179,7 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
         if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
             return fundId;
         }
-        fundId = approvalSponsorshipFundId(to, callData);
+        fundId = approvalSponsorshipFundId(from, to, callData);
         if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
             return fundId;
         }

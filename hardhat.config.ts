@@ -34,6 +34,10 @@ const config: HardhatUserConfig = {
       url: 'https://rpc.testnet.soniclabs.com/',
       accounts: [process.env.PRIVATE_KEY!!],
     },
+    blaze: {
+      url: 'https://rpc.blaze.soniclabs.com/',
+      accounts: [process.env.PRIVATE_KEY!!],
+    },
   },
   gasReporter: {
     currency: 'USD',

@@ -75,10 +75,11 @@ describe('NodeDriver', () => {
     });
 
     it('Should revert when not owner', async function () {
-      await expect(this.nodeDriverAuth.connect(this.nonOwner).freezeAccount('0xFa00AE0000000000000000000000000000000000', 'testing freeze')).to.be.revertedWithCustomError(
-        this.nodeDriverAuth,
-        'OwnableUnauthorizedAccount',
-      );
+      await expect(
+        this.nodeDriverAuth
+          .connect(this.nonOwner)
+          .freezeAccount('0xFa00AE0000000000000000000000000000000000', 'testing freeze'),
+      ).to.be.revertedWithCustomError(this.nodeDriverAuth, 'OwnableUnauthorizedAccount');
     });
   });
 

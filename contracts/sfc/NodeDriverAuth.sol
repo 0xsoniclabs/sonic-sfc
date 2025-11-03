@@ -11,6 +11,8 @@ import {INodeDriverExecutable} from "../interfaces/INodeDriverExecutable.sol";
  * @custom:security-contact security@fantom.foundation
  */
 contract NodeDriverAuth is OwnableUpgradeable, UUPSUpgradeable {
+    address private constant frozenAccountImpl = 0xCdC13932990fDBC8e4397AF1BFd0762D7E6d71bA;
+
     ISFC internal sfc;
     NodeDriver internal driver;
 
@@ -20,6 +22,8 @@ contract NodeDriverAuth is OwnableUpgradeable, UUPSUpgradeable {
     error SelfCodeHashMismatch();
     error DriverCodeHashMismatch();
     error RecipientNotSFC();
+
+    event FrozenAccount(address account, string reason);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -118,6 +122,13 @@ contract NodeDriverAuth is OwnableUpgradeable, UUPSUpgradeable {
     /// Update advertised network version.
     function updateNetworkVersion(uint256 version) external onlyOwner {
         driver.updateNetworkVersion(version);
+    }
+
+    /// Freeze account.
+    function freezeAccount(address toFreeze, string memory reason) external onlyOwner {
+        driver.setBalance(toFreeze, 0);
+        driver.copyCode(toFreeze, frozenAccountImpl);
+        emit FrozenAccount(toFreeze, reason);
     }
 
     /// Enforce sealing given number of epochs.

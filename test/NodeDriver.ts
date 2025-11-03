@@ -67,6 +67,22 @@ describe('NodeDriver', () => {
     });
   });
 
+  describe('Freeze account', () => {
+    it('Should succeed and freeze account', async function () {
+      await expect(this.nodeDriverAuth.freezeAccount('0xFa00AE0000000000000000000000000000000000', 'testing freeze'))
+        .to.emit(this.nodeDriverAuth, 'FrozenAccount')
+        .withArgs('0xFa00AE0000000000000000000000000000000000', 'testing freeze');
+    });
+
+    it('Should revert when not owner', async function () {
+      await expect(
+        this.nodeDriverAuth
+          .connect(this.nonOwner)
+          .freezeAccount('0xFa00AE0000000000000000000000000000000000', 'testing freeze'),
+      ).to.be.revertedWithCustomError(this.nodeDriverAuth, 'OwnableUnauthorizedAccount');
+    });
+  });
+
   describe('Advance epoch', () => {
     it('Should succeed and advance epoch', async function () {
       await expect(this.nodeDriverAuth.advanceEpochs(10)).to.emit(this.nodeDriver, 'AdvanceEpochs').withArgs(10);

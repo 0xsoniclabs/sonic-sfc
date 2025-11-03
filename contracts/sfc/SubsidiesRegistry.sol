@@ -109,9 +109,8 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
         if (to == address(0) || callData.length != 2 * 32 + 4) {
             return bytes32(0);
         }
-        bytes4 selector = bytes4(callData[:4]);
-        if (selector != 0x095ea7b3) {
-            // ERC20 approve
+        // is ERC20 approval
+        if (bytes4(callData[:4]) != IERC20.approve.selector) {
             return bytes32(0);
         }
         // approval has to be for a non-zero value

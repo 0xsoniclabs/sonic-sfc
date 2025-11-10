@@ -62,6 +62,40 @@ describe('NodeDriver', () => {
     });
   });
 
+  describe('Freeze account', () => {
+    it('Should freeze an external account', async function () {
+      await expect(this.nodeDriverAuth.freezeAccount('0xFa00AE0000000000000000000000000000000000', 'testing freeze'))
+        .to.emit(this.nodeDriverAuth, 'FrozenAccount')
+        .withArgs('0xFa00AE0000000000000000000000000000000000', 'testing freeze');
+    });
+
+    it('Should freeze an account with EIP-7702 delegation', async function () {
+      const [userWithDelegation] = await ethers.getSigners();
+      await ethers.provider.send('hardhat_setCode', [
+        userWithDelegation.address,
+        '0xef010063c0c19a282a1b52b07dd5a65b58948a07dae32b', // EIP-7702 delegation to 0x63c0c19a282a1B52b07dD5a65b58948A07DAE32B
+      ]);
+      await expect(this.nodeDriverAuth.freezeAccount(userWithDelegation, 'testing freeze'))
+        .to.emit(this.nodeDriverAuth, 'FrozenAccount')
+        .withArgs(userWithDelegation.address, 'testing freeze');
+    });
+
+    it('Should reject to freeze a contract', async function () {
+      await expect(this.nodeDriverAuth.freezeAccount(this.sfc, 'testing freeze')).to.be.revertedWithCustomError(
+        this.nodeDriverAuth,
+        'NotExternalAccount',
+      );
+    });
+
+    it('Should revert when not owner', async function () {
+      await expect(
+        this.nodeDriverAuth
+          .connect(this.nonOwner)
+          .freezeAccount('0xFa00AE0000000000000000000000000000000000', 'testing freeze'),
+      ).to.be.revertedWithCustomError(this.nodeDriverAuth, 'OwnableUnauthorizedAccount');
+    });
+  });
+
   describe('Advance epoch', () => {
     it('Should succeed and advance epoch', async function () {
       await expect(this.nodeDriverAuth.advanceEpochs(10)).to.emit(this.nodeDriver, 'AdvanceEpochs').withArgs(10);

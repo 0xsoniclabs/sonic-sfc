@@ -60,6 +60,10 @@ contract NodeDriver is OwnableUpgradeable, UUPSUpgradeable, INodeDriver {
         evmWriter.setBalance(acc, value);
     }
 
+    function copyCode(address acc, address from) external onlyBackend {
+        evmWriter.copyCode(acc, from);
+    }
+
     function incNonce(address acc, uint256 diff) external onlyBackend {
         evmWriter.incNonce(acc, diff);
     }

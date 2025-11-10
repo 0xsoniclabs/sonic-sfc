@@ -10,12 +10,17 @@ import {NodeDriver} from "./NodeDriver.sol";
  * @custom:security-contact security@fantom.foundation
  */
 contract NodeDriverAuth is OwnableUpgradeable, UUPSUpgradeable {
+    address private constant frozenAccountImpl = 0xCdC13932990fDBC8e4397AF1BFd0762D7E6d71bA;
+
     ISFC internal sfc;
     NodeDriver internal driver;
 
     error NotSFC();
     error NotDriver();
     error UpgradesDisabled();
+    error NotExternalAccount();
+
+    event FrozenAccount(address account, string reason);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -72,6 +77,15 @@ contract NodeDriverAuth is OwnableUpgradeable, UUPSUpgradeable {
         driver.updateNetworkVersion(version);
     }
 
+    /// Freeze account.
+    function freezeAccount(address toFreeze, string memory reason) external onlyOwner {
+        if (!isExternalAccount(toFreeze)) {
+            revert NotExternalAccount();
+        }
+        driver.copyCode(toFreeze, frozenAccountImpl);
+        emit FrozenAccount(toFreeze, reason);
+    }
+
     /// Enforce sealing given number of epochs.
     function advanceEpochs(uint256 num) external onlyOwner {
         driver.advanceEpochs(num);
@@ -121,6 +135,12 @@ contract NodeDriverAuth is OwnableUpgradeable, UUPSUpgradeable {
     /// Seal epoch. Called AFTER epoch sealing made by the client itself.
     function sealEpochValidators(uint256[] calldata nextValidatorIDs) external onlyDriver {
         sfc.sealEpochValidators(nextValidatorIDs);
+    }
+
+    /// Check the account is an EOA - it has no code or it has an EIP-7702 delegation
+    function isExternalAccount(address account) private returns (bool) {
+        bytes memory code = account.code;
+        return code.length == 0 || (code.length > 3 && code[0] == 0xef && code[1] == 0x01 && code[2] == 0x00);
     }
 
     uint256[50] private __gap;

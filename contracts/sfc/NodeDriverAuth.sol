@@ -19,8 +19,10 @@ contract NodeDriverAuth is OwnableUpgradeable, UUPSUpgradeable {
     error NotDriver();
     error UpgradesDisabled();
     error NotExternalAccount();
+    error NotFrozenAccount();
 
     event FrozenAccount(address account, string reason);
+    event UnfrozenAccount(address account, string reason);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -79,11 +81,20 @@ contract NodeDriverAuth is OwnableUpgradeable, UUPSUpgradeable {
 
     /// Freeze account.
     function freezeAccount(address toFreeze, string memory reason) external onlyOwner {
-        if (!isExternalAccount(toFreeze)) {
+        if (!isExternalAccount(toFreeze) || toFreeze == address(0)) {
             revert NotExternalAccount();
         }
         driver.copyCode(toFreeze, frozenAccountImpl);
         emit FrozenAccount(toFreeze, reason);
+    }
+
+    /// Unfreeze account.
+    function unfreezeAccount(address toUnfreeze, string memory reason) external onlyOwner {
+        if (toUnfreeze.codehash != frozenAccountImpl.codehash) {
+            revert NotFrozenAccount();
+        }
+        driver.copyCode(toUnfreeze, address(0));
+        emit UnfrozenAccount(toUnfreeze, reason);
     }
 
     /// Enforce sealing given number of epochs.

@@ -4,6 +4,10 @@ import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
 import { IEVMWriter, NetworkInitializer } from '../typechain-types';
 
 describe('NodeDriver', () => {
+  const frozenAccountImpl = '0xCdC13932990fDBC8e4397AF1BFd0762D7E6d71bA';
+  const frozenAccountImplCode =
+    '0x608060405236603a576040517fed40684000000000000000000000000000000000000000000000000000000000815260040160405180910390fd5b6040517fed40684000000000000000000000000000000000000000000000000000000000815260040160405180910390fdfea26469706673582212206cf1a51a4e5cb0532b7b5e5e0cb6f65f8e2edc1f1d1fe43ee664113b62dddf7664736f6c634300081e0033';
+
   const fixture = async () => {
     const [owner, nonOwner] = await ethers.getSigners();
     const sfc = await upgrades.deployProxy(await ethers.getContractFactory('UnitTestSFC'), {
@@ -29,6 +33,9 @@ describe('NodeDriver', () => {
       to: await node.getAddress(),
       value: ethers.parseEther('10'),
     });
+
+    // deploy frozen account impl
+    await ethers.provider.send('hardhat_setCode', [frozenAccountImpl, frozenAccountImplCode]);
 
     await initializer.connect(node).initializeAll(12, 0, sfc, nodeDriverAuth, nodeDriver, evmWriter, owner);
 
@@ -92,6 +99,39 @@ describe('NodeDriver', () => {
         this.nodeDriverAuth
           .connect(this.nonOwner)
           .freezeAccount('0xFa00AE0000000000000000000000000000000000', 'testing freeze'),
+      ).to.be.revertedWithCustomError(this.nodeDriverAuth, 'OwnableUnauthorizedAccount');
+    });
+  });
+
+  describe('Unfreeze account', () => {
+    it('Should unfreeze an account', async function () {
+      const account = '0xFa00AE0000000000000000000000000000000000';
+      await ethers.provider.send('hardhat_setCode', [account, frozenAccountImplCode]);
+      await expect(
+        this.nodeDriverAuth.unfreezeAccount('0xFa00AE0000000000000000000000000000000000', 'testing unfreeze'),
+      )
+        .to.emit(this.nodeDriverAuth, 'UnfrozenAccount')
+        .withArgs('0xFa00AE0000000000000000000000000000000000', 'testing unfreeze');
+    });
+
+    it('Should reject to overwrite a contract', async function () {
+      await expect(this.nodeDriverAuth.unfreezeAccount(this.sfc, 'testing freeze')).to.be.revertedWithCustomError(
+        this.nodeDriverAuth,
+        'NotFrozenAccount',
+      );
+    });
+
+    it('Should reject to overwrite a not-frozen account', async function () {
+      await expect(
+        this.nodeDriverAuth.unfreezeAccount('0xFa00AE0000000000000000000000000000000000', 'testing freeze'),
+      ).to.be.revertedWithCustomError(this.nodeDriverAuth, 'NotFrozenAccount');
+    });
+
+    it('Should revert when not owner', async function () {
+      await expect(
+        this.nodeDriverAuth
+          .connect(this.nonOwner)
+          .unfreezeAccount('0xFa00AE0000000000000000000000000000000000', 'testing freeze'),
       ).to.be.revertedWithCustomError(this.nodeDriverAuth, 'OwnableUnauthorizedAccount');
     });
   });

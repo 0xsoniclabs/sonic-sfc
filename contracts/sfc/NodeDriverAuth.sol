@@ -151,7 +151,7 @@ contract NodeDriverAuth is OwnableUpgradeable, UUPSUpgradeable {
     /// Check the account is an EOA - it has no code or it has an EIP-7702 delegation
     function isExternalAccount(address account) private returns (bool) {
         bytes memory code = account.code;
-        return code.length == 0 || (code.length > 3 && code[0] == 0xef && code[1] == 0x01 && code[2] == 0x00);
+        return code.length == 0 || (code.length == 23 && code[0] == 0xef && code[1] == 0x01 && code[2] == 0x00);
     }
 
     uint256[50] private __gap;

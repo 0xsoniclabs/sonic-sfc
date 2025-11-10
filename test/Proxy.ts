@@ -130,6 +130,13 @@ describe('NodeDriver', () => {
         ).to.be.revertedWithCustomError(this.nodeDriver, 'OwnableUnauthorizedAccount');
       });
 
+      it('Should be disabled', async function () {
+        await expect(
+          upgrades.upgradeProxy(this.nodeDriver, (await ethers.getContractFactory('NodeDriver')).connect(this.owner)),
+        ).to.be.revertedWithCustomError(this.nodeDriver, 'UpgradesDisabled');
+      });
+
+      /*
       it('Should succeed and upgrade', async function () {
         // get the implementation address
         // the address is stored at slot keccak-256 hash of "eip1967.proxy.implementation" subtracted by 1
@@ -155,6 +162,7 @@ describe('NodeDriver', () => {
           await newImpl.getAddress(),
         );
       });
+      */
     });
   });
 });

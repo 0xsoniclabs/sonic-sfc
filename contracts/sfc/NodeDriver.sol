@@ -19,6 +19,7 @@ contract NodeDriver is OwnableUpgradeable, UUPSUpgradeable, INodeDriver {
 
     error NotNode();
     error NotBackend();
+    error UpgradesDisabled();
 
     /// Callable only by NodeDriverAuth (which mediates calls from SFC and from admins)
     modifier onlyBackend() {
@@ -49,24 +50,14 @@ contract NodeDriver is OwnableUpgradeable, UUPSUpgradeable, INodeDriver {
         evmWriter = IEVMWriter(_evmWriterAddress);
     }
 
-    /// Override the upgrade authorization check to allow upgrades only from the owner.
+    /// Override the upgrade authorization check to disable upgrades.
     // solhint-disable-next-line no-empty-blocks
-    function _authorizeUpgrade(address) internal override onlyOwner {}
+    function _authorizeUpgrade(address) internal view override onlyOwner {
+        revert UpgradesDisabled();
+    }
 
     function setBalance(address acc, uint256 value) external onlyBackend {
         evmWriter.setBalance(acc, value);
-    }
-
-    function copyCode(address acc, address from) external onlyBackend {
-        evmWriter.copyCode(acc, from);
-    }
-
-    function swapCode(address acc, address where) external onlyBackend {
-        evmWriter.swapCode(acc, where);
-    }
-
-    function setStorage(address acc, bytes32 key, bytes32 value) external onlyBackend {
-        evmWriter.setStorage(acc, key, value);
     }
 
     function incNonce(address acc, uint256 diff) external onlyBackend {

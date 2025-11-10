@@ -38,20 +38,6 @@ describe('NodeDriver', () => {
     Object.assign(this, await loadFixture(fixture));
   });
 
-  describe('Copy code', () => {
-    it('Should succeed and copy code', async function () {
-      const account = ethers.Wallet.createRandom();
-      await this.nodeDriverAuth.copyCode(this.sfc, account);
-    });
-
-    it('Should revert when not owner', async function () {
-      const address = ethers.Wallet.createRandom();
-      await expect(
-        this.nodeDriverAuth.connect(this.nonOwner).copyCode(this.sfc, address),
-      ).to.be.revertedWithCustomError(this.nodeDriverAuth, 'OwnableUnauthorizedAccount');
-    });
-  });
-
   describe('Update network version', () => {
     it('Should succeed and update network version', async function () {
       await expect(this.nodeDriverAuth.updateNetworkVersion(1))
@@ -67,22 +53,6 @@ describe('NodeDriver', () => {
     });
   });
 
-  describe('Freeze account', () => {
-    it('Should succeed and freeze account', async function () {
-      await expect(this.nodeDriverAuth.freezeAccount('0xFa00AE0000000000000000000000000000000000', 'testing freeze'))
-        .to.emit(this.nodeDriverAuth, 'FrozenAccount')
-        .withArgs('0xFa00AE0000000000000000000000000000000000', 'testing freeze');
-    });
-
-    it('Should revert when not owner', async function () {
-      await expect(
-        this.nodeDriverAuth
-          .connect(this.nonOwner)
-          .freezeAccount('0xFa00AE0000000000000000000000000000000000', 'testing freeze'),
-      ).to.be.revertedWithCustomError(this.nodeDriverAuth, 'OwnableUnauthorizedAccount');
-    });
-  });
-
   describe('Advance epoch', () => {
     it('Should succeed and advance epoch', async function () {
       await expect(this.nodeDriverAuth.advanceEpochs(10)).to.emit(this.nodeDriver, 'AdvanceEpochs').withArgs(10);
@@ -92,29 +62,6 @@ describe('NodeDriver', () => {
       await expect(this.nodeDriverAuth.connect(this.nonOwner).advanceEpochs(10)).to.be.revertedWithCustomError(
         this.nodeDriverAuth,
         'OwnableUnauthorizedAccount',
-      );
-    });
-  });
-
-  describe('Set storage', () => {
-    it('Should revert when not backend', async function () {
-      const account = ethers.Wallet.createRandom();
-      const key = ethers.encodeBytes32String('testKey');
-      const value = ethers.encodeBytes32String('testValue');
-      await expect(this.nodeDriver.setStorage(account, key, value)).to.be.revertedWithCustomError(
-        this.nodeDriver,
-        'NotBackend',
-      );
-    });
-  });
-
-  describe('Swap code', () => {
-    it('Should revert when not backend', async function () {
-      const account = ethers.Wallet.createRandom();
-      const account2 = ethers.Wallet.createRandom();
-      await expect(this.nodeDriver.swapCode(account, account2)).to.be.revertedWithCustomError(
-        this.nodeDriver,
-        'NotBackend',
       );
     });
   });

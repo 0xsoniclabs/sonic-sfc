@@ -178,7 +178,10 @@ describe('SFC', () => {
       await this.constants.updateIssuedTokensRecipient(this.user);
       const supply = await this.sfc.totalSupply();
       const amount = ethers.parseEther('100');
-      await this.sfc.connect(this.owner).issueTokens(amount);
+      const expectedNewBalance = (await ethers.provider.getBalance(this.user)) + amount;
+      await expect(this.sfc.connect(this.owner).issueTokens(amount))
+        .to.emit(this.evmWriter, 'EvmWriterSetBalance')
+        .withArgs(this.user, expectedNewBalance);
       expect(await this.sfc.totalSupply()).to.equal(supply + amount);
     });
   });
@@ -319,19 +322,6 @@ describe('SFC', () => {
       await expect(this.sfc.transferOwnership(ethers.ZeroAddress))
         .to.be.revertedWithCustomError(this.nodeDriverAuth, 'OwnableInvalidOwner')
         .withArgs(ethers.ZeroAddress);
-    });
-  });
-
-  describe('Events emitter', () => {
-    it('Should succeed and call updateNetworkRules', async function () {
-      await this.nodeDriverAuth.updateNetworkRules(
-        '0x7b22446167223a7b224d6178506172656e7473223a357d2c2245636f6e6f6d79223a7b22426c6f636b4d6973736564536c61636b223a377d2c22426c6f636b73223a7b22426c6f636b476173486172644c696d6974223a313030307d7d',
-      );
-    });
-
-    it('Should succeed and call updateOfflinePenaltyThreshold', async function () {
-      await this.constants.updateOfflinePenaltyThresholdTime(86_400);
-      await this.constants.updateOfflinePenaltyThresholdBlocksNum(1_000);
     });
   });
 

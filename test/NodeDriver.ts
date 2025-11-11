@@ -49,7 +49,7 @@ describe('NodeDriver', () => {
 
   describe('Update network version', () => {
     it('Should succeed and update network version', async function () {
-      await expect(this.nodeDriverAuth.updateNetworkVersion(1))
+      await expect(this.nodeDriverAuth.connect(this.owner).updateNetworkVersion(1))
         .to.emit(this.nodeDriver, 'UpdateNetworkVersion')
         .withArgs(1);
     });
@@ -58,6 +58,31 @@ describe('NodeDriver', () => {
       await expect(this.nodeDriverAuth.connect(this.nonOwner).updateNetworkVersion(1)).to.be.revertedWithCustomError(
         this.nodeDriverAuth,
         'OwnableUnauthorizedAccount',
+      );
+    });
+  });
+
+  describe('Update network rules', () => {
+    it('Should succeed and update network rules', async function () {
+      const diff = ethers.toUtf8Bytes('{"key":"value"}');
+      await expect(this.nodeDriverAuth.connect(this.owner).updateNetworkRules(diff))
+        .to.emit(this.nodeDriver, 'UpdateNetworkRules')
+        .withArgs(diff);
+    });
+
+    it('Should revert when not owner', async function () {
+      const diff = ethers.toUtf8Bytes('{"key":"value"}');
+      await expect(this.nodeDriverAuth.connect(this.nonOwner).updateNetworkRules(diff)).to.be.revertedWithCustomError(
+        this.nodeDriverAuth,
+        'OwnableUnauthorizedAccount',
+      );
+    });
+
+    it('Should revert when not backend', async function () {
+      const diff = ethers.toUtf8Bytes('{"key":"value"}');
+      await expect(this.nodeDriver.connect(this.nonOwner).updateNetworkRules(diff)).to.be.revertedWithCustomError(
+        this.nodeDriver,
+        'NotBackend',
       );
     });
   });
@@ -73,12 +98,24 @@ describe('NodeDriver', () => {
         'OwnableUnauthorizedAccount',
       );
     });
+
+    it('Should revert when not backend', async function () {
+      await expect(this.nodeDriver.connect(this.nonOwner).advanceEpochs(10)).to.be.revertedWithCustomError(
+        this.nodeDriver,
+        'NotBackend',
+      );
+    });
   });
 
-  describe('Add genesis validator', () => {
+  describe('Add genesis validator and delegation', () => {
     it('Should succeed', async function () {
       const account = ethers.Wallet.createRandom();
       await this.nodeDriver.connect(this.node).setGenesisValidator(account, 1, account.publicKey, Date.now());
+      await expect(this.nodeDriver.connect(this.node).setGenesisDelegation(account, 1, 100))
+        .to.emit(this.nodeDriver, 'UpdateValidatorPubkey')
+        .withArgs(1, account.publicKey)
+        .to.emit(this.nodeDriver, 'UpdateValidatorWeight')
+        .withArgs(1, 100);
     });
 
     it('Should revert when not node', async function () {
@@ -86,6 +123,10 @@ describe('NodeDriver', () => {
       await expect(
         this.nodeDriver.setGenesisValidator(account, 1, account.publicKey, Date.now()),
       ).to.be.revertedWithCustomError(this.nodeDriver, 'NotNode');
+      await expect(this.nodeDriver.setGenesisDelegation(account, 1, 100)).to.be.revertedWithCustomError(
+        this.nodeDriver,
+        'NotNode',
+      );
     });
   });
 
@@ -113,24 +154,6 @@ describe('NodeDriver', () => {
     });
   });
 
-  describe('Set genesis delegation', () => {
-    it('Should succeed', async function () {
-      const account = ethers.Wallet.createRandom();
-      await this.nodeDriver.connect(this.node).setGenesisValidator(account, 1, account.publicKey, Date.now());
-      await expect(this.nodeDriver.connect(this.node).setGenesisDelegation(account, 1, 100))
-        .to.emit(this.nodeDriver, 'UpdateValidatorWeight')
-        .withArgs(1, 100);
-    });
-
-    it('Should revert when not node', async function () {
-      const account = ethers.Wallet.createRandom();
-      await expect(this.nodeDriver.setGenesisDelegation(account, 1, 100)).to.be.revertedWithCustomError(
-        this.nodeDriver,
-        'NotNode',
-      );
-    });
-  });
-
   describe('Seal epoch validators', () => {
     it('Should succeed', async function () {
       await this.nodeDriver.connect(this.node).sealEpochValidators([0, 1]);
@@ -153,6 +176,23 @@ describe('NodeDriver', () => {
       await expect(this.nodeDriver.sealEpoch([0, 1], [0, 1], [0, 1], [0, 1])).to.be.revertedWithCustomError(
         this.nodeDriver,
         'NotNode',
+      );
+    });
+  });
+
+  describe('Increment account nonce', () => {
+    it('Should succeed', async function () {
+      const account = ethers.Wallet.createRandom();
+      await expect(this.nodeDriverAuth.connect(this.owner).incNonce(account, 5))
+        .to.emit(this.evmWriter, 'EvmWriterIncNonce')
+        .withArgs(account, 5);
+    });
+
+    it('Should revert when not owner', async function () {
+      const account = ethers.Wallet.createRandom();
+      await expect(this.nodeDriverAuth.connect(this.nonOwner).incNonce(account, 5)).to.be.revertedWithCustomError(
+        this.nodeDriverAuth,
+        'OwnableUnauthorizedAccount',
       );
     });
   });

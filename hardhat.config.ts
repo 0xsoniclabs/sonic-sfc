@@ -36,7 +36,11 @@ const config: HardhatUserConfig = {
     },
     blaze: {
       url: 'https://rpc.blaze.soniclabs.com/',
-      accounts: [process.env.PRIVATE_KEY!!],
+      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY!!] : [],
+    },
+    local: {
+      url: 'http://localhost:18545/',
+      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY!!] : [],
     },
   },
   gasReporter: {
@@ -75,6 +79,7 @@ const config: HardhatUserConfig = {
         salt: '0x0000000000000000000000000000000000000000000000000000000000000000',
       },
     },
+    requiredConfirmations: 1, // sufficient on sonic
   },
 };
 

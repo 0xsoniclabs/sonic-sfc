@@ -15,7 +15,6 @@ contract NodeDriverAuth is OwnableUpgradeable, UUPSUpgradeable {
 
     error NotSFC();
     error NotDriver();
-    error UpgradesDisabled();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -30,11 +29,9 @@ contract NodeDriverAuth is OwnableUpgradeable, UUPSUpgradeable {
         sfc = ISFC(_sfc);
     }
 
-    /// Override the upgrade authorization check to disable upgrades.
+    /// Override the upgrade authorization check to allow upgrades only from the owner.
     // solhint-disable-next-line no-empty-blocks
-    function _authorizeUpgrade(address) internal view override onlyOwner {
-        revert UpgradesDisabled();
-    }
+    function _authorizeUpgrade(address) internal override onlyOwner {}
 
     /// Callable only by SFC contract.
     modifier onlySFC() {

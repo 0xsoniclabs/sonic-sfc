@@ -22,11 +22,20 @@ describe('NodeDriver', () => {
     const initializer: NetworkInitializer = await ethers.deployContract('NetworkInitializer');
     const evmWriter: IEVMWriter = await ethers.deployContract('StubEvmWriter');
 
-    await initializer.initializeAll(12, 0, sfc, nodeDriverAuth, nodeDriver, evmWriter, owner);
+    // Impersonate the Sonic node (address(0)) for testing purposes and fund it
+    await ethers.provider.send('hardhat_impersonateAccount', ['0x0000000000000000000000000000000000000000']);
+    const node = await ethers.getSigner('0x0000000000000000000000000000000000000000');
+    await nonOwner.sendTransaction({
+      to: await node.getAddress(),
+      value: ethers.parseEther('10'),
+    });
+
+    await initializer.connect(node).initializeAll(12, 0, sfc, nodeDriverAuth, nodeDriver, evmWriter, owner);
 
     return {
       owner,
       nonOwner,
+      node,
       sfc,
       nodeDriver,
       evmWriter,
@@ -36,20 +45,6 @@ describe('NodeDriver', () => {
 
   beforeEach(async function () {
     Object.assign(this, await loadFixture(fixture));
-  });
-
-  describe('Copy code', () => {
-    it('Should succeed and copy code', async function () {
-      const account = ethers.Wallet.createRandom();
-      await this.nodeDriverAuth.copyCode(this.sfc, account);
-    });
-
-    it('Should revert when not owner', async function () {
-      const address = ethers.Wallet.createRandom();
-      await expect(
-        this.nodeDriverAuth.connect(this.nonOwner).copyCode(this.sfc, address),
-      ).to.be.revertedWithCustomError(this.nodeDriverAuth, 'OwnableUnauthorizedAccount');
-    });
   });
 
   describe('Update network version', () => {
@@ -67,22 +62,6 @@ describe('NodeDriver', () => {
     });
   });
 
-  describe('Freeze account', () => {
-    it('Should succeed and freeze account', async function () {
-      await expect(this.nodeDriverAuth.freezeAccount('0xFa00AE0000000000000000000000000000000000', 'testing freeze'))
-        .to.emit(this.nodeDriverAuth, 'FrozenAccount')
-        .withArgs('0xFa00AE0000000000000000000000000000000000', 'testing freeze');
-    });
-
-    it('Should revert when not owner', async function () {
-      await expect(
-        this.nodeDriverAuth
-          .connect(this.nonOwner)
-          .freezeAccount('0xFa00AE0000000000000000000000000000000000', 'testing freeze'),
-      ).to.be.revertedWithCustomError(this.nodeDriverAuth, 'OwnableUnauthorizedAccount');
-    });
-  });
-
   describe('Advance epoch', () => {
     it('Should succeed and advance epoch', async function () {
       await expect(this.nodeDriverAuth.advanceEpochs(10)).to.emit(this.nodeDriver, 'AdvanceEpochs').withArgs(10);
@@ -96,30 +75,12 @@ describe('NodeDriver', () => {
     });
   });
 
-  describe('Set storage', () => {
-    it('Should revert when not backend', async function () {
-      const account = ethers.Wallet.createRandom();
-      const key = ethers.encodeBytes32String('testKey');
-      const value = ethers.encodeBytes32String('testValue');
-      await expect(this.nodeDriver.setStorage(account, key, value)).to.be.revertedWithCustomError(
-        this.nodeDriver,
-        'NotBackend',
-      );
-    });
-  });
-
-  describe('Swap code', () => {
-    it('Should revert when not backend', async function () {
-      const account = ethers.Wallet.createRandom();
-      const account2 = ethers.Wallet.createRandom();
-      await expect(this.nodeDriver.swapCode(account, account2)).to.be.revertedWithCustomError(
-        this.nodeDriver,
-        'NotBackend',
-      );
-    });
-  });
-
   describe('Add genesis validator', () => {
+    it('Should succeed', async function () {
+      const account = ethers.Wallet.createRandom();
+      await this.nodeDriver.connect(this.node).setGenesisValidator(account, 1, account.publicKey, Date.now());
+    });
+
     it('Should revert when not node', async function () {
       const account = ethers.Wallet.createRandom();
       await expect(
@@ -129,12 +90,38 @@ describe('NodeDriver', () => {
   });
 
   describe('Deactivate validator', () => {
+    it('Should succeed for existing validator', async function () {
+      const account = ethers.Wallet.createRandom();
+      await this.nodeDriver.connect(this.node).setGenesisValidator(account, 1, account.publicKey, Date.now());
+      await expect(this.nodeDriver.connect(this.node).deactivateValidator(1, 1))
+        .to.emit(this.nodeDriver, 'UpdateValidatorWeight')
+        .withArgs(1, 0);
+    });
+
+    it('Should reject to activate', async function () {
+      const account = ethers.Wallet.createRandom();
+      await this.nodeDriver.connect(this.node).setGenesisValidator(account, 1, account.publicKey, Date.now());
+      const OK_STATUS = 0;
+      await expect(this.nodeDriver.connect(this.node).deactivateValidator(1, OK_STATUS)).to.be.revertedWithCustomError(
+        this.sfc,
+        'NotDeactivatedStatus',
+      );
+    });
+
     it('Should revert when not node', async function () {
-      await expect(this.nodeDriver.deactivateValidator(0, 1)).to.be.revertedWithCustomError(this.nodeDriver, 'NotNode');
+      await expect(this.nodeDriver.deactivateValidator(1, 1)).to.be.revertedWithCustomError(this.nodeDriver, 'NotNode');
     });
   });
 
   describe('Set genesis delegation', () => {
+    it('Should succeed', async function () {
+      const account = ethers.Wallet.createRandom();
+      await this.nodeDriver.connect(this.node).setGenesisValidator(account, 1, account.publicKey, Date.now());
+      await expect(this.nodeDriver.connect(this.node).setGenesisDelegation(account, 1, 100))
+        .to.emit(this.nodeDriver, 'UpdateValidatorWeight')
+        .withArgs(1, 100);
+    });
+
     it('Should revert when not node', async function () {
       const account = ethers.Wallet.createRandom();
       await expect(this.nodeDriver.setGenesisDelegation(account, 1, 100)).to.be.revertedWithCustomError(
@@ -145,6 +132,10 @@ describe('NodeDriver', () => {
   });
 
   describe('Seal epoch validators', () => {
+    it('Should succeed', async function () {
+      await this.nodeDriver.connect(this.node).sealEpochValidators([0, 1]);
+    });
+
     it('Should revert when not node', async function () {
       await expect(this.nodeDriver.sealEpochValidators([0, 1])).to.be.revertedWithCustomError(
         this.nodeDriver,
@@ -154,6 +145,10 @@ describe('NodeDriver', () => {
   });
 
   describe('Seal epoch', () => {
+    it('Should succeed', async function () {
+      await this.nodeDriver.connect(this.node).sealEpoch([0, 1], [0, 1], [0, 1], [0, 1]);
+    });
+
     it('Should revert when not node', async function () {
       await expect(this.nodeDriver.sealEpoch([0, 1], [0, 1], [0, 1], [0, 1])).to.be.revertedWithCustomError(
         this.nodeDriver,

@@ -5,25 +5,16 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {ISFC} from "../interfaces/ISFC.sol";
 import {NodeDriver} from "./NodeDriver.sol";
-import {INodeDriverExecutable} from "../interfaces/INodeDriverExecutable.sol";
 
 /**
  * @custom:security-contact security@fantom.foundation
  */
 contract NodeDriverAuth is OwnableUpgradeable, UUPSUpgradeable {
-    address private constant frozenAccountImpl = 0xCdC13932990fDBC8e4397AF1BFd0762D7E6d71bA;
-
     ISFC internal sfc;
     NodeDriver internal driver;
 
     error NotSFC();
     error NotDriver();
-    error NotContract();
-    error SelfCodeHashMismatch();
-    error DriverCodeHashMismatch();
-    error RecipientNotSFC();
-
-    event FrozenAccount(address account, string reason);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -58,55 +49,9 @@ contract NodeDriverAuth is OwnableUpgradeable, UUPSUpgradeable {
         _;
     }
 
-    function _execute(address executable, address newOwner, bytes32 selfCodeHash, bytes32 driverCodeHash) internal {
-        _transferOwnership(executable);
-        INodeDriverExecutable(executable).execute();
-        _transferOwnership(newOwner);
-        if (_getCodeHash(address(this)) != selfCodeHash) {
-            revert SelfCodeHashMismatch();
-        }
-        if (_getCodeHash(address(driver)) != driverCodeHash) {
-            revert DriverCodeHashMismatch();
-        }
-    }
-
-    /// Execute a batch update of network configuration.
-    /// The executable will run with the privileges of the NodeDriverAuth owner.
-    /// Does not allow changing NodeDriver and NodeDriverAuth code.
-    function execute(address executable) external onlyOwner {
-        _execute(executable, owner(), _getCodeHash(address(this)), _getCodeHash(address(driver)));
-    }
-
-    /// Execute a batch update of network configuration.
-    /// Run given contract with a permission of the NodeDriverAuth owner.
-    /// Allows changing NodeDriver and NodeDriverAuth code.
-    function mutExecute(
-        address executable,
-        address newOwner,
-        bytes32 selfCodeHash,
-        bytes32 driverCodeHash
-    ) external onlyOwner {
-        _execute(executable, newOwner, selfCodeHash, driverCodeHash);
-    }
-
     /// Mint native token. To be used by SFC for minting validators rewards.
     function incBalance(address acc, uint256 diff) external onlySFC {
         driver.setBalance(acc, acc.balance + diff);
-    }
-
-    /// Upgrade code of given contract by copying it from other deployed contract.
-    /// Avoids setting code to an external address.
-    function upgradeCode(address acc, address from) external onlyOwner {
-        if (!isContract(acc) || !isContract(from)) {
-            revert NotContract();
-        }
-        driver.copyCode(acc, from);
-    }
-
-    /// Upgrade code of given contract by copying it from other deployed contract.
-    /// Does not avoid setting code to an external address. (DANGEROUS!)
-    function copyCode(address acc, address from) external onlyOwner {
-        driver.copyCode(acc, from);
     }
 
     /// Increment nonce of the given account.
@@ -122,13 +67,6 @@ contract NodeDriverAuth is OwnableUpgradeable, UUPSUpgradeable {
     /// Update advertised network version.
     function updateNetworkVersion(uint256 version) external onlyOwner {
         driver.updateNetworkVersion(version);
-    }
-
-    /// Freeze account.
-    function freezeAccount(address toFreeze, string memory reason) external onlyOwner {
-        driver.setBalance(toFreeze, 0);
-        driver.copyCode(toFreeze, frozenAccountImpl);
-        emit FrozenAccount(toFreeze, reason);
     }
 
     /// Enforce sealing given number of epochs.
@@ -180,14 +118,6 @@ contract NodeDriverAuth is OwnableUpgradeable, UUPSUpgradeable {
     /// Seal epoch. Called AFTER epoch sealing made by the client itself.
     function sealEpochValidators(uint256[] calldata nextValidatorIDs) external onlyDriver {
         sfc.sealEpochValidators(nextValidatorIDs);
-    }
-
-    function isContract(address account) internal view returns (bool) {
-        return account.code.length > 0;
-    }
-
-    function _getCodeHash(address addr) internal view returns (bytes32) {
-        return addr.codehash;
     }
 
     uint256[50] private __gap;

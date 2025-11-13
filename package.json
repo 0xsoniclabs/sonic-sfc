@@ -1,12 +1,11 @@
 {
-  "name": "opera-sfc",
-  "version": "3.0.5-rc.1",
+  "name": "sonic-sfc",
+  "version": "4.0.4",
   "description": "Special Fee Contract",
-  "author": "Fantom Foundation",
-  "license": "MIT",
+  "author": "Sonic Operations Ltd",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Fantom-foundation/opera-sfc.git"
+    "url": "https://github.com/0xsoniclabs/sonic-sfc.git"
   },
   "scripts": {
     "compile": "hardhat compile",

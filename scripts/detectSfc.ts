@@ -6,7 +6,7 @@ import { AddressLike } from 'ethers';
 
 async function main() {
   const NODE_DRIVER_ADDRESS = '0xd100a01e00000000000000000000000000000000';
-  const ZERO_SLOT = '0x0000000000000000000000000000000000000000000000000000000000000000';
+  const ZERO_SLOT = '0x' + '0'.repeat(64);
 
   const nodeDriver = await ethers.getContractAt('NodeDriver', NODE_DRIVER_ADDRESS);
   console.log('NodeDriver: ', NODE_DRIVER_ADDRESS);

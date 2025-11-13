@@ -20,7 +20,7 @@ async function main() {
   await tx1.wait();
   console.log('ConstantsManager.issuedTokensRecipient set to ', TARGET_ADDRESS);
 
-  const amount = ethers.parseUnits('100', 18);
+  const amount = ethers.parseEther('100');
   const tx2 = await sfc.issueTokens(amount);
   await tx2.wait();
   console.log('Issued ', ethers.formatEther(amount), ' tokens');

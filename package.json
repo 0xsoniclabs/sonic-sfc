@@ -1,19 +1,18 @@
 {
-  "name": "opera-sfc",
-  "version": "3.0.5-rc.1",
+  "name": "sonic-sfc",
+  "version": "4.0.4",
   "description": "Special Fee Contract",
-  "author": "Fantom Foundation",
-  "license": "MIT",
+  "author": "Sonic Operations Ltd",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Fantom-foundation/opera-sfc.git"
+    "url": "https://github.com/0xsoniclabs/sonic-sfc.git"
   },
   "scripts": {
     "compile": "hardhat compile",
     "lint": "npm run lint:js && npm run lint:sol",
     "lint:fix": "npm run lint:js-fix && npm run lint:sol-fix",
-    "lint:js": "prettier --log-level warn '**/*.{js,ts}' --check && eslint 'test/*.ts'",
-    "lint:js-fix": "prettier --log-level warn '**/*.{js,ts}' --write && eslint 'test/*.ts' --fix",
+    "lint:js": "prettier --log-level warn '**/*.{js,ts}' --check && eslint 'test/*.ts' 'scripts/*.ts'",
+    "lint:js-fix": "prettier --log-level warn '**/*.{js,ts}' --write && eslint 'test/*.ts' 'scripts/*.ts' --fix",
     "lint:sol": "prettier --log-level warn 'contracts/**/*.sol' --check && solhint 'contracts/**/*.sol'",
     "lint:sol-fix": "prettier --log-level warn 'contracts/**/*.sol' --write",
     "gas-report": "env REPORT_GAS=true npm run test",

@@ -189,6 +189,7 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
 
     // stashing
     error NothingToStash();
+    error InvalidEpoch();
 
     // slashing
     error ValidatorNotSlashed();
@@ -217,6 +218,7 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
     );
     event ClaimedRewards(address indexed delegator, uint256 indexed toValidatorID, uint256 rewards);
     event RestakedRewards(address indexed delegator, uint256 indexed toValidatorID, uint256 rewards);
+    event DistributedExtraRewards(uint256 indexed epochID, uint256 received, uint256 distributed);
     event BurntNativeTokens(uint256 amount);
     event UpdatedSlashingRefundRatio(uint256 indexed validatorID, uint256 refundRatio);
     event AnnouncedRedirection(address indexed from, address indexed to);
@@ -462,6 +464,7 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
             revert ZeroAmount();
         }
         _burnNativeTokens(msg.value);
+        emit BurntNativeTokens(msg.value);
     }
 
     /// Issue tokens to the issued tokens recipient as a counterparty to the burnt FTM tokens.
@@ -758,8 +761,8 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
         if (!sent) {
             revert TransferFailed();
         }
-        _burnNativeTokens(penalty);
 
+        _burnNativeTokens(penalty);
         emit Withdrawn(delegator, toValidatorID, wrID, amount - penalty, penalty);
     }
 
@@ -809,6 +812,11 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
         return nonStashedReward != 0;
     }
 
+    /// Stash the given amount of rewards to the given validator account.
+    function _stashValidatorRewardTo(uint256 validatorID, uint256 amount) internal {
+        _rewardsStash[getValidator[validatorID].auth][validatorID] += amount;
+    }
+
     /// Claim rewards for a delegator.
     function _claimRewards(address delegator, uint256 toValidatorID) internal returns (uint256) {
         _stashRewards(delegator, toValidatorID);
@@ -820,6 +828,48 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
         // It's important that we mint after erasing (protection against Re-Entrancy)
         _mintNativeToken(rewards);
         return rewards;
+    }
+
+    /// Distribute extra rewards for validators at given epoch coming from an external source.
+    /// The tokens received are burned and the reward share is added to the stash of each
+    /// validator eligible for the reward in the given epoch. An optional `withBurn` flag
+    /// allows the sender to signal that preconfigured percentage of the rewards should be burned.
+    function distributeExtraReward(uint256 epoch, bool withBurn) external payable {
+        if (epoch > currentSealedEpoch) {
+            revert InvalidEpoch();
+        }
+        if (msg.value == 0) {
+            revert ZeroRewards();
+        }
+
+        // calculate the final amount to be distributed with the optional burn share
+        uint256 amountToDistribute = msg.value;
+        if (withBurn) {
+            // Solidity v0.8+ numeric underflow protection should prevent hidden mint
+            amountToDistribute = (msg.value * (Decimal.unit() - c.extraRewardsBurnRatio())) / Decimal.unit();
+        }
+
+        // burn everything for now, but only the signaled burn share will remain burned
+        // the stashed amount will be re-minted by reward claims
+        _burnNativeTokens(msg.value);
+
+        // distribute the individual shares
+        EpochSnapshot storage epochRewarded = getEpochSnapshot[epoch];
+        uint256 amountDistributed = 0;
+        for (uint256 i = 0; i < epochRewarded.validatorIDs.length; i++) {
+            uint256 validatorID = epochRewarded.validatorIDs[i];
+            uint256 share = (amountToDistribute * epochRewarded.receivedStake[validatorID]) / epochRewarded.totalStake;
+            if (share > 0) {
+                _stashValidatorRewardTo(validatorID, share);
+                amountDistributed += share;
+            }
+        }
+
+        // weird sum result; may the totalStake not be the expected sum of received stakes?
+        if (amountDistributed > amountToDistribute) {
+            revert ValueTooLarge();
+        }
+        emit DistributedExtraRewards(epoch, msg.value, amountDistributed);
     }
 
     /// Burn native tokens.
@@ -834,7 +884,6 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
             if (!sent) {
                 revert TransferFailed();
             }
-            emit BurntNativeTokens(amount);
         }
     }
 

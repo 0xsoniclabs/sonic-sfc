@@ -155,7 +155,7 @@ describe('SFC', () => {
     });
 
     it('Should succeed and return version of the current implementation', async function () {
-      expect(await this.sfc.version()).to.equal('0x040000');
+      expect(await this.sfc.version()).to.equal('0x040004');
     });
   });
 

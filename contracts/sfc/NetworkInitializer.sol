@@ -30,6 +30,7 @@ contract NetworkInitializer {
         consts.updateValidatorCommission((15 * Decimal.unit()) / 100);
         consts.updateBurntFeeShare(0);
         consts.updateTreasuryFeeShare((90 * Decimal.unit()) / 100);
+        consts.updateExtraRewardsBurnRatio((60 * Decimal.unit()) / 100);
         consts.updateWithdrawalPeriodEpochs(3);
         consts.updateWithdrawalPeriodTime(60 * 60 * 24 * 7);
         consts.updateBaseRewardPerSecond(1_000);

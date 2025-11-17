@@ -18,13 +18,17 @@ contract ConstantsManager is Ownable {
     uint256 public burntFeeShare;
     // The percentage of fees to transfer to treasury address, e.g., 10%
     uint256 public treasuryFeeShare;
+    // The percentage of extra rewards to be burned, e.g. 60%
+    uint256 public extraRewardsBurnRatio;
     // the number of epochs that undelegated stake is locked for
     uint256 public withdrawalPeriodEpochs;
     // the number of seconds that undelegated stake is locked for
     uint256 public withdrawalPeriodTime;
-
+    // The max amount of rewards released by the network to its stakers every second
     uint256 public baseRewardPerSecond;
+    // The max number of consecutive confirmed blocks a validator can be inactive before irreversibly deactivated
     uint256 public offlinePenaltyThresholdBlocksNum;
+    // The max number of seconds a validator can be inactive before irreversibly deactivated
     uint256 public offlinePenaltyThresholdTime;
 
     // The number of epochs to calculate the average uptime ratio from, acceptable bound [10, 87600].
@@ -36,7 +40,7 @@ contract ConstantsManager is Ownable {
     uint64 public minAverageUptime;
 
     // The address of the recipient that receives issued tokens
-    // as a counterparty to the burnt FTM tokens
+    // as a counterparty to the burnt S tokens
     address public issuedTokensRecipient;
 
     /**
@@ -92,6 +96,13 @@ contract ConstantsManager is Ownable {
         treasuryFeeShare = v;
     }
 
+    function updateExtraRewardsBurnRatio(uint256 v) external onlyOwner {
+        if (v > Decimal.unit()) {
+            revert ValueTooLarge();
+        }
+        extraRewardsBurnRatio = v;
+    }
+
     function updateWithdrawalPeriodEpochs(uint256 v) external onlyOwner {
         if (v < 2) {
             revert ValueTooSmall();
@@ -103,7 +114,7 @@ contract ConstantsManager is Ownable {
     }
 
     function updateWithdrawalPeriodTime(uint256 v) external onlyOwner {
-        if (v < 86400) {
+        if (v < 3600) {
             revert ValueTooSmall();
         }
         if (v > 30 * 86400) {

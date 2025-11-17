@@ -33,7 +33,7 @@ contract ConstantsMigrator {
 
         // set the newly added constants to their default values
         // these are not expected to be present in the previous contract version and can not be transferred
-        target.updateExtraRewardsBurnRatio((60 * Decimal.unit()) / 100); // 60% burn
+        target.updateExtraRewardsBurnRatio((50 * Decimal.unit()) / 100); // defaults to 50% burn
 
         // pass the new constants contract ownership to mirror the source
         target.transferOwnership(source.owner());

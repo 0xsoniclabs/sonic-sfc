@@ -96,7 +96,7 @@ contract ConstantsManager is Ownable {
         treasuryFeeShare = v;
     }
 
-    function updateExtraRewardsBurnRatio(uint256 v) external onlyOwner {
+    function updateExtraRewardsBurnRatio(uint256 v) external virtual onlyOwner {
         if (v > Decimal.unit()) {
             revert ValueTooLarge();
         }

@@ -1,19 +1,18 @@
 import { ethers } from 'hardhat';
 import { expect } from 'chai';
 import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
-import { ConstantsMigrator, UnitTestConstantsManager, StubNetworkInitializer } from '../typechain-types';
+import { ConstantsMigrator, StubNetworkInitializer, ConstantsManager } from '../typechain-types';
 
 describe('ConstantsMigrator', () => {
   const fixture = async () => {
     const [owner, nonOwner] = await ethers.getSigners();
 
-    // Deploy a stub SFC contract to copy code from and set at the SFC address
     const stubSfc = await ethers.deployContract('StubSFC', [owner]);
     const initializer: StubNetworkInitializer = await ethers.deployContract('StubNetworkInitializer');
     await initializer.initializeAll(stubSfc, owner);
 
-    const srcConstants: UnitTestConstantsManager = await ethers.getContractAt(
-      'UnitTestConstantsManager',
+    const srcConstants: ConstantsManager = await ethers.getContractAt(
+      'ConstantsManager',
       await stubSfc.constsAddress(),
     );
 
@@ -33,8 +32,8 @@ describe('ConstantsMigrator', () => {
     Object.assign(this, await loadFixture(fixture));
   });
 
-  describe('SFC Constants Migration', () => {
-    it('Should succeed and migrate', async function () {
+  describe('ConstantsMigrator', () => {
+    it('Should succeed and migrate to mirrored values', async function () {
       // execute the migration and get the new constants address
       const tx = await this.migrator.deployAndMigrate(this.stubSfc);
       await expect(tx).to.emit(this.migrator, 'MigratedTo');
@@ -43,10 +42,7 @@ describe('ConstantsMigrator', () => {
       const targetAddress = result.logs?.find((e: { fragment: { name: string } }) => e.fragment?.name === 'MigratedTo')
         ?.args?.[0];
 
-      const targetConstants: UnitTestConstantsManager = await ethers.getContractAt(
-        'UnitTestConstantsManager',
-        targetAddress,
-      );
+      const targetConstants: ConstantsManager = await ethers.getContractAt('ConstantsManager', targetAddress);
 
       // the new constants owner should be the same as the source constants owner
       expect(await targetConstants.owner()).to.equal(this.owner);

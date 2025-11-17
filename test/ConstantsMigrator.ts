@@ -33,8 +33,8 @@ describe('ConstantsMigrator', () => {
     Object.assign(this, await loadFixture(fixture));
   });
 
-  describe('SFC Constants Migration', () => {
-    it('Should succeed and migrate', async function () {
+  describe('ConstantsMigrator', () => {
+    it('Should succeed and migrate to mirrored values', async function () {
       // execute the migration and get the new constants address
       const tx = await this.migrator.deployAndMigrate(this.stubSfc);
       await expect(tx).to.emit(this.migrator, 'MigratedTo');

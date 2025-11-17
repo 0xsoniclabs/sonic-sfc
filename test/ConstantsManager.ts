@@ -119,6 +119,28 @@ describe('ConstantsManager', () => {
     });
   });
 
+  describe('Update extract rewards burn ratio', () => {
+    it('Should revert when not owner', async function () {
+      await expect(this.manager.connect(this.nonOwner).updateExtraRewardsBurnRatio(1000)).to.be.revertedWithCustomError(
+        this.manager,
+        'OwnableUnauthorizedAccount',
+      );
+    });
+
+    it('Should revert when value is too large', async function () {
+      // set extra rewards burn over 100%
+      await expect(
+        this.manager.connect(this.owner).updateExtraRewardsBurnRatio((BigInt(1e18) * 101n) / 100n),
+      ).to.be.revertedWithCustomError(this.manager, 'ValueTooLarge');
+    });
+
+    it('Should succeed and update the extra reward burn ratio', async function () {
+      const newValue = BigInt(1e18) / 2n;
+      await this.manager.connect(this.owner).updateExtraRewardsBurnRatio(newValue);
+      expect(await this.manager.extraRewardsBurnRatio()).to.equal(newValue);
+    });
+  });
+
   describe('Update treasury fee share', () => {
     it('Should revert when not owner', async function () {
       await expect(this.manager.connect(this.nonOwner).updateTreasuryFeeShare(1000)).to.be.revertedWithCustomError(
@@ -182,7 +204,7 @@ describe('ConstantsManager', () => {
 
     it('Should revert when value is too small', async function () {
       await expect(
-        this.manager.connect(this.owner).updateWithdrawalPeriodTime(86_400 - 1),
+        this.manager.connect(this.owner).updateWithdrawalPeriodTime(3_600 - 1),
       ).to.be.revertedWithCustomError(this.manager, 'ValueTooSmall');
     });
 

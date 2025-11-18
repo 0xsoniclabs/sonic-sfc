@@ -8,7 +8,7 @@ import { BlockchainNode, ValidatorMetrics } from './helpers/BlockchainNode';
 describe('SFC', () => {
   const fixture = async () => {
     const [owner, user] = await ethers.getSigners();
-    const totalSupply = ethers.parseEther('100');
+    const totalSupply = ethers.parseEther('5000');
     const sfc = await upgrades.deployProxy(await ethers.getContractFactory('UnitTestSFC'), {
       kind: 'uups',
       initializer: false,
@@ -155,7 +155,7 @@ describe('SFC', () => {
     });
 
     it('Should succeed and return version of the current implementation', async function () {
-      expect(await this.sfc.version()).to.equal('0x040000');
+      expect(await this.sfc.version()).to.equal('0x040005');
     });
   });
 
@@ -1125,6 +1125,110 @@ describe('SFC', () => {
       expect(await this.sfc.getEpochAverageUptime(await this.sfc.currentSealedEpoch(), this.validatorId)).to.equal(
         480000000000000000n,
       );
+    });
+  });
+
+  describe('Extra rewards distribution', () => {
+    const validatorsFixture = async function (this: Context) {
+      const blockchainNode = new BlockchainNode(this.sfc);
+      await this.sfc.rebaseTime();
+      await this.sfc.enableNonNodeCalls();
+
+      const signers = await ethers.getSigners();
+      for (let i = 1; i <= 10; i++) {
+        const pubKey = ethers.concat(['0xc0', ethers.Wallet.createRandom().signingKey.publicKey]);
+        const stake = Math.floor(Math.random() * 10) + 1;
+        await blockchainNode.handleTx(
+          await this.sfc.connect(signers[i]).createValidator(pubKey, { value: ethers.parseEther(stake.toString()) }),
+        );
+      }
+      await blockchainNode.sealEpoch(0); // empty genesis epoch
+      await blockchainNode.sealEpoch(0); // sealed with the vals above
+
+      return {
+        blockchainNode,
+      };
+    };
+
+    beforeEach(async function () {
+      return Object.assign(this, await loadFixture(validatorsFixture.bind(this)));
+    });
+
+    it('Should reject extra rewards for unsealed epoch', async function () {
+      expect(await this.sfc.currentSealedEpoch()).to.equal(2);
+      await expect(this.sfc.distributeExtraReward(3, false)).to.be.revertedWithCustomError(this.sfc, 'InvalidEpoch');
+    });
+
+    it('Should reject zero amount of extra rewards', async function () {
+      await expect(this.sfc.distributeExtraReward(2, false, { value: 0 })).to.be.revertedWithCustomError(
+        this.sfc,
+        'ZeroRewards',
+      );
+    });
+
+    it('Should reject hidden mint through invalid burn ratio', async function () {
+      expect(await this.sfc.currentSealedEpoch()).to.equal(2);
+      await this.constants.updateExtraRewardsBurnRatio(ethers.parseEther('1.1')); // set excessive ratio
+      await expect(this.sfc.distributeExtraReward(2, true, { value: ethers.parseEther('1') })).to.be.revertedWithPanic(
+        0x11,
+      );
+    });
+
+    const tryToDistributeRewards = async function (this: Context, epoch: number, withBurn: boolean) {
+      expect(await this.sfc.currentSealedEpoch()).to.greaterThanOrEqual(epoch);
+
+      // check the initial rewards stash state is clean
+      const valsID = await this.sfc.getEpochValidatorIDs(epoch);
+      const signers = await ethers.getSigners();
+      for (let i = 0; i < valsID.length; i++) {
+        expect(await this.sfc.rewardsStash(signers[i + 1].address, valsID[i])).to.equal(0);
+      }
+
+      const amount = ethers.parseEther((Math.floor(Math.random() * 10) + 1).toString());
+      let expectedAmount = amount;
+      if (withBurn) {
+        expectedAmount = (amount * (BigInt(1e18) - (await this.constants.extraRewardsBurnRatio()))) / BigInt(1e18);
+      }
+
+      const tx = await this.sfc.distributeExtraReward(epoch, withBurn, { value: amount });
+      await expect(tx).to.emit(this.sfc, 'DistributedExtraRewards');
+
+      const result = await tx.wait();
+      const distributed = result.logs?.find(
+        (e: { fragment: { name: string } }) => e.fragment?.name === 'DistributedExtraRewards',
+      )?.args?.[2];
+
+      // the burn caused by the int math rounding should be at most 1wei per validator and signaled in the event
+      expect(distributed).to.lessThanOrEqual(expectedAmount);
+      expect(distributed).to.approximately(expectedAmount, valsID.length, 'Inherent burn too large');
+      if (distributed < amount) {
+        await expect(tx)
+          .to.emit(this.sfc, 'BurntNativeTokens')
+          .withArgs(amount - distributed);
+      }
+
+      // verify the stashed rewards are correct within 1wei int math rounding
+      for (let i = 0; i < valsID.length; i++) {
+        const expectedReward =
+          (distributed * this.blockchainNode.validatorWeights.get(valsID[i])) / this.blockchainNode.totalWeight;
+        expect(await this.sfc.rewardsStash(signers[i + 1].address, valsID[i])).to.approximately(expectedReward, 1n);
+      }
+    };
+
+    it('Should distribute extra rewards without burn', async function () {
+      await tryToDistributeRewards.bind(this)(2, false);
+    });
+
+    it('Should distribute extra rewards with zero burn ratio', async function () {
+      await this.constants.updateExtraRewardsBurnRatio(0);
+      await tryToDistributeRewards.bind(this)(2, true);
+    });
+
+    it('Should distribute extra rewards with pre-configured burn ratio', async function () {
+      const ratio = BigInt(Math.floor(Math.random() * 75) + 15);
+      await this.constants.updateExtraRewardsBurnRatio((ratio * BigInt(1e18)) / 100n);
+
+      await tryToDistributeRewards.bind(this)(2, true);
     });
   });
 });

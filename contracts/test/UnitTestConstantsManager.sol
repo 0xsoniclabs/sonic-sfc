@@ -17,4 +17,8 @@ contract UnitTestConstantsManager is ConstantsManager {
     function updateOfflinePenaltyThresholdTime(uint256 v) external override onlyOwner {
         offlinePenaltyThresholdTime = v;
     }
+
+    function updateExtraRewardsBurnRatio(uint256 v) external override onlyOwner {
+        extraRewardsBurnRatio = v;
+    }
 }

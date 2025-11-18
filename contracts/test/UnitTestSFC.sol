@@ -6,7 +6,6 @@ import {SFC} from "../sfc/SFC.sol";
 import {ISFC} from "../interfaces/ISFC.sol";
 import {NodeDriverAuth} from "../sfc/NodeDriverAuth.sol";
 import {NodeDriver} from "../sfc/NodeDriver.sol";
-import {UnitTestConstantsManager} from "./UnitTestConstantsManager.sol";
 
 contract UnitTestSFC is SFC {
     uint256 internal time;
@@ -49,37 +48,5 @@ contract UnitTestSFC is SFC {
 
     function syncValidator(uint256 validatorID, bool syncPubkey) public {
         _syncValidator(validatorID, syncPubkey);
-    }
-}
-
-contract UnitTestNetworkInitializer {
-    function initializeAll(
-        uint256 sealedEpoch,
-        uint256 totalSupply,
-        address payable _sfc,
-        address _auth,
-        address _driver,
-        address _evmWriter,
-        address _owner
-    ) external {
-        NodeDriver(_driver).initialize(_auth, _evmWriter, _owner);
-        NodeDriverAuth(_auth).initialize(_sfc, _driver, _owner);
-
-        UnitTestConstantsManager consts = new UnitTestConstantsManager(address(this));
-        consts.updateMinSelfStake((3175 * Decimal.unit()) / 10000);
-        consts.updateMaxDelegatedRatio(16 * Decimal.unit());
-        consts.updateValidatorCommission((15 * Decimal.unit()) / 100);
-        consts.updateBurntFeeShare((20 * Decimal.unit()) / 100);
-        consts.updateTreasuryFeeShare((10 * Decimal.unit()) / 100);
-        consts.updateWithdrawalPeriodEpochs(3);
-        consts.updateWithdrawalPeriodTime(60 * 60 * 24 * 7);
-        consts.updateBaseRewardPerSecond(6183414351851851852);
-        consts.updateOfflinePenaltyThresholdTime(3 days);
-        consts.updateOfflinePenaltyThresholdBlocksNum(1000);
-        consts.updateAverageUptimeEpochWindow(10);
-        consts.updateMinAverageUptime(0); // check disabled by default
-        consts.transferOwnership(_owner);
-
-        ISFC(_sfc).initialize(sealedEpoch, totalSupply, _auth, address(consts), _owner);
     }
 }

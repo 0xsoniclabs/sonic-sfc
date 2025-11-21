@@ -26,7 +26,7 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
 
     mapping(bytes32 fundId => Fund fund) private sponsorships;
 
-    /// @notice GasLimit to be used for deductFees() calls.
+    /// @notice GasLimit to be used for chooseFund() calls.
     uint256 public chooseFundGasLimit;
 
     /// @notice GasLimit to be used for deductFees() transactions.
@@ -131,7 +131,7 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
                 return bytes32(0);
             }
         }
-        // user's balance have to be non-zero for an approval to be sponsored
+        // user's ERC20 balance have to be non-zero for an approval to be sponsored
         {
             (bool balanceOk, bytes memory balanceOutput) = to.staticcall(
                 abi.encodeWithSelector(IERC20.balanceOf.selector, from)

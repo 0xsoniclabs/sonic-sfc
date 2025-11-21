@@ -6,6 +6,7 @@ import { AddressLike } from 'ethers';
 
 async function main() {
   const NODE_DRIVER_ADDRESS = '0xd100a01e00000000000000000000000000000000';
+  const SUBSIDIES_REGISTRY_ADDRESS = '0x7d0E23398b6CA0eC7Cdb5b5Aad7F1b11215012d2';
   const ZERO_SLOT = '0x' + '0'.repeat(64);
 
   const nodeDriver = await ethers.getContractAt('NodeDriver', NODE_DRIVER_ADDRESS);
@@ -31,6 +32,12 @@ async function main() {
   console.log('ConstantsManager:', constantsManagerAddress);
   console.log(' - owner: ', await constantsManager.owner());
   console.log(' - issuedTokensRecipient: ', await constantsManager.issuedTokensRecipient());
+
+  const subsidiesRegistry = await ethers.getContractAt('SubsidiesRegistry', SUBSIDIES_REGISTRY_ADDRESS);
+  console.log('SubsidiesRegistry: ', SUBSIDIES_REGISTRY_ADDRESS);
+  console.log(' - implementation: ', await getImplementation(subsidiesRegistry));
+  console.log(' - owner: ', await subsidiesRegistry.owner());
+  console.log(' - getGasConfig: ', await subsidiesRegistry.getGasConfig());
 }
 
 function storageToAddress(storageSlot: string): string {

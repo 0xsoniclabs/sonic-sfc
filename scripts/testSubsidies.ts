@@ -1,7 +1,12 @@
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
 
-// Test Subsidies on the given chain:
+// Test Gas Subsidies on a live Sonic chain
+// This script must run against a real Sonic node (not Hardhat).
+// Requirements:
+//   * Use --network pointing to a chain where GasSubsidies upgrade is enabled.
+//   * Set PRIVATE_KEY env variable to an account holding at least 0.2 S.
+// Run as:
 // npx hardhat run scripts/testSubsidies.ts --no-compile --network local
 
 async function main() {
@@ -18,7 +23,7 @@ async function main() {
   await erc20.waitForDeployment();
   console.log('TestingERC20:', await erc20.getAddress());
 
-  // sponsee has to have non-zero ERC20 balance - mint
+  // subsidized user has to have non-zero ERC20 balance - mint
   const mintTx = await erc20.mint(from, 1000n);
   await mintTx.wait();
 

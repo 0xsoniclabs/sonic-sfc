@@ -20,6 +20,7 @@ class BlockchainNode {
   public readonly sfc: UnitTestSFC;
   public validatorWeights: Map<bigint, bigint>;
   public nextValidatorWeights: Map<bigint, bigint>;
+  public totalWeight: bigint = 0n;
 
   constructor(sfc: UnitTestSFC) {
     this.sfc = sfc;
@@ -33,12 +34,14 @@ class BlockchainNode {
     for (const log of logs) {
       const parsedLog = iface.parseLog(log);
       if (parsedLog?.name === 'UpdateValidatorWeight') {
-        const validatorID = parsedLog.args.validatorID;
-        const weight = parsedLog.args.weight;
-        if (weight == 0) {
+        const validatorID = ethers.toBigInt(parsedLog.args.validatorID);
+        const weight = ethers.toBigInt(parsedLog.args.weight);
+        this.totalWeight -= this.validatorWeights.get(validatorID) ?? 0n;
+        if (weight === 0n) {
           this.nextValidatorWeights.delete(validatorID);
         } else {
           this.nextValidatorWeights.set(validatorID, weight);
+          this.totalWeight += weight;
         }
       }
     }

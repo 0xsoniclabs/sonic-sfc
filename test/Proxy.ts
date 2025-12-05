@@ -57,8 +57,8 @@ describe('SFC', () => {
 
       it('Should succeed and upgrade', async function () {
         // try updating some variable
-        const newContsManager = ethers.Wallet.createRandom();
-        await this.sfc.connect(this.owner).updateConstsAddress(newContsManager);
+        const newConstsManager = ethers.Wallet.createRandom();
+        await this.sfc.connect(this.owner).updateConstsAddress(newConstsManager);
 
         // get the implementation address
         // the address is stored at slot keccak-256 hash of "eip1967.proxy.implementation" subtracted by 1
@@ -67,11 +67,12 @@ describe('SFC', () => {
           '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc',
         );
 
-        // upgrade proxy with unit test sfc - to skip bytecode optimization and replace the implementation for real
-        await upgrades.upgradeProxy(this.sfc, (await ethers.getContractFactory('UnitTestSFC')).connect(this.owner));
+        const newImpl = await ethers.deployContract('SFC');
+        // upgrade proxy with new implementation
+        await this.sfc.connect(this.owner).upgradeToAndCall(newImpl, '0x');
 
         // check if the variable is still the same
-        expect(await this.sfc.constsAddress()).to.equal(newContsManager);
+        expect(await this.sfc.constsAddress()).to.equal(newConstsManager);
 
         // check that the implementation address changed
         const newImplementation = await ethers.provider.getStorage(

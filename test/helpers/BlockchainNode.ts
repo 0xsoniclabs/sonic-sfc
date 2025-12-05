@@ -36,7 +36,7 @@ class BlockchainNode {
       if (parsedLog?.name === 'UpdateValidatorWeight') {
         const validatorID = ethers.toBigInt(parsedLog.args.validatorID);
         const weight = ethers.toBigInt(parsedLog.args.weight);
-        this.totalWeight -= this.validatorWeights.get(validatorID) ?? 0n;
+        this.totalWeight -= this.nextValidatorWeights.get(validatorID) ?? 0n;
         if (weight === 0n) {
           this.nextValidatorWeights.delete(validatorID);
         } else {

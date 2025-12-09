@@ -25,6 +25,7 @@ const config: HardhatUserConfig = {
   networks: {
     hardhat: {
       allowUnlimitedContractSize: true,
+      allowBlocksWithSameTimestamp: true,
     },
     sonic: {
       url: 'https://rpc.soniclabs.com/',

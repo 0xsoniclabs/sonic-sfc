@@ -1,6 +1,7 @@
-import { UnitTestSFC } from '../../typechain-types';
+import { SFC } from '../../typechain-types';
 import { TransactionResponse } from 'ethers';
 import { ethers } from 'hardhat';
+import { time } from '@nomicfoundation/hardhat-network-helpers';
 
 class ValidatorMetrics {
   public readonly offlineTime: number;
@@ -17,12 +18,12 @@ class ValidatorMetrics {
 }
 
 class BlockchainNode {
-  public readonly sfc: UnitTestSFC;
+  public readonly sfc: SFC;
   public validatorWeights: Map<bigint, bigint>;
   public nextValidatorWeights: Map<bigint, bigint>;
   public totalWeight: bigint = 0n;
 
-  constructor(sfc: UnitTestSFC) {
+  constructor(sfc: SFC) {
     this.sfc = sfc;
     this.validatorWeights = new Map();
     this.nextValidatorWeights = new Map();
@@ -36,7 +37,7 @@ class BlockchainNode {
       if (parsedLog?.name === 'UpdateValidatorWeight') {
         const validatorID = ethers.toBigInt(parsedLog.args.validatorID);
         const weight = ethers.toBigInt(parsedLog.args.weight);
-        this.totalWeight -= this.validatorWeights.get(validatorID) ?? 0n;
+        this.totalWeight -= this.nextValidatorWeights.get(validatorID) ?? 0n;
         if (weight === 0n) {
           this.nextValidatorWeights.delete(validatorID);
         } else {
@@ -67,7 +68,7 @@ class BlockchainNode {
       [[], [], [], []] as [number[], number[], number[], bigint[]],
     );
 
-    await this.sfc.advanceTime(duration);
+    await time.increase(duration);
     await this.handleTx(await this.sfc.sealEpoch(offlineTimes, offlineBlocks, uptimes, originatedTxsFees));
     await this.handleTx(await this.sfc.sealEpochValidators(nextValidatorIds));
 

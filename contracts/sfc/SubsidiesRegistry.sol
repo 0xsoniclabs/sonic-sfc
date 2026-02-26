@@ -4,6 +4,7 @@ pragma solidity 0.8.27;
 import {ISFC} from "../interfaces/ISFC.sol";
 import {ISubsidiesRegistry} from "../interfaces/ISubsidiesRegistry.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -12,7 +13,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  * @notice Registry managing transaction sponsoring funds.
  * @custom:security-contact security@fantom.foundation
  */
-contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgradeable {
+contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgradeable, PausableUpgradeable {
     struct Fund {
         uint256 available;
         uint256 totalContributions;
@@ -53,6 +54,7 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
     function initialize() external initializer {
         __Ownable_init(SFC.owner());
         __UUPSUpgradeable_init();
+        __Pausable_init();
         chooseFundGasLimit = 100_000;
         deductFeesGasLimit = 100_000;
     }
@@ -149,8 +151,7 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
 
     /// @notice Bootstrap sponsorships cover the first few transactions from a new account. This allows new users to get started without having to acquire native tokens first.
     /// @param nonce The transaction nonce
-    function bootstrapSponsorshipFund(uint256 nonce) public pure returns (bytes32) {
-        // TODO: check that the user balance is below the required fee?
+    function bootstrapSponsorshipFundId(uint256 nonce) public pure returns (bytes32) {
         if (nonce < 3) {
             return keccak256(abi.encodePacked("b"));
         }
@@ -186,7 +187,7 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
         if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
             return fundId;
         }
-        fundId = bootstrapSponsorshipFund(nonce);
+        fundId = bootstrapSponsorshipFundId(nonce);
         if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
             return fundId;
         }
@@ -220,7 +221,7 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
     /// @dev Increases the fund's available balance, the sender's contribution record,
     ///      and the total contributions counter.
     /// @param fundId The unique identifier of the sponsorship fund.
-    function sponsor(bytes32 fundId) public payable {
+    function sponsor(bytes32 fundId) public payable whenNotPaused {
         require(fundId != bytes32(0), ZeroFundId());
         require(msg.value > 0, NoFundsAttached());
         require(owner() != address(0), NotInitialized()); // avoid paying into implementation contract
@@ -239,7 +240,7 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
     /// @param fundId The unique identifier of the sponsorship fund.
     /// @param amount The requested withdrawal amount (in wei). If larger than the maximum allowed,
     ///        it will be capped to the sponsor's withdrawable share.
-    function withdraw(bytes32 fundId, uint256 amount) external {
+    function withdraw(bytes32 fundId, uint256 amount) external whenNotPaused {
         require(fundId != bytes32(0), ZeroFundId());
         Fund storage fund = sponsorships[fundId];
         uint256 maxAmount = _availableToWithdraw(fund, msg.sender);
@@ -321,6 +322,16 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
     /// @param newLimit The new GasLimit value.
     function setDeductFeesGasLimit(uint256 newLimit) external onlyOwner {
         deductFeesGasLimit = newLimit;
+    }
+
+    /// @notice Pause the contract, preventing sponsorships to be set up or withdrawn.
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /// @notice Unpause the contract, allowing sponsorships to be set up or withdrawn again.
+    function unpause() external onlyOwner {
+        _unpause();
     }
 
     /// Override the upgrade authorization check to allow upgrades only from the owner.

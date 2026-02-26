@@ -184,6 +184,23 @@ describe('SubsidiesRegistry', () => {
     });
   });
 
+  it('Enforce pause', async function () {
+    await this.registry.connect(this.owner).pause();
+    const fundId = '0x0000000000000000000000000000000000000000000000000000000000000123';
+    await expect(this.registry.connect(this.sponsor).sponsor(fundId, { value: 100 })).to.be.revertedWithCustomError(
+      this.registry,
+      'EnforcedPause',
+    );
+    await expect(this.registry.connect(this.sponsor).withdraw(fundId, 10)).to.be.revertedWithCustomError(
+      this.registry,
+      'EnforcedPause',
+    );
+    await this.registry.connect(this.owner).unpause();
+    await expect(this.registry.connect(this.sponsor).sponsor(fundId, { value: 100 }))
+      .to.emit(this.registry, 'Sponsored')
+      .withArgs(fundId, this.sponsor, 100);
+  });
+
   it('Enforce ownerOnly', async function () {
     const anyAddress = ethers.Wallet.createRandom();
     expect(this.registry.upgradeToAndCall(anyAddress, '0x')).to.be.revertedWithCustomError(
@@ -198,6 +215,8 @@ describe('SubsidiesRegistry', () => {
       this.registry,
       'OwnableUnauthorizedAccount',
     );
+    expect(this.registry.pause()).to.be.revertedWithCustomError(this.registry, 'OwnableUnauthorizedAccount');
+    expect(this.registry.unpause()).to.be.revertedWithCustomError(this.registry, 'OwnableUnauthorizedAccount');
 
     await this.registry.connect(this.owner).setChooseFundGasLimit(123);
     await this.registry.connect(this.owner).setDeductFeesGasLimit(123);

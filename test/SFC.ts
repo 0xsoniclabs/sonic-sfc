@@ -531,7 +531,38 @@ describe('SFC', () => {
       await this.sfcAsNode.sealEpochValidators(allValidators);
     });
 
+    it("Decreases totalSupply by originated transaction fees", async function () {
+      const originatedTxsFee1 = 50n;
+      const originatedTxsFee2 = 20n;
+      const validatorMetrics = new Map<bigint, ValidatorMetrics>();
+      validatorMetrics.set(1n, new ValidatorMetrics(0, 0, 100, originatedTxsFee1));
+      validatorMetrics.set(2n, new ValidatorMetrics(0, 0, 100, originatedTxsFee2));
+      await this.blockchainNode.sealEpoch(100, validatorMetrics);
+      expect(await this.sfc.totalSupply()).to.equal(this.totalSupply - (originatedTxsFee1 + originatedTxsFee2));
+    });
+
     describe('Treasury', () => {
+      it("Receives fee share while epoch sealing", async function () {
+        const treasury = ethers.Wallet.createRandom();
+        await this.sfc.connect(this.owner).updateTreasuryAddress(treasury);
+
+        const feeShare = ethers.parseEther('0.123'); // 12.3% fee share
+        const originatedTxsFee1 = 600n;
+        const originatedTxsFee2 = 400n;
+        const originatedTxsFee = originatedTxsFee1 + originatedTxsFee2;
+        const expectedTreasuryIncrease = (originatedTxsFee  * feeShare) / BigInt(1e18);
+
+        await this.constants.updateTreasuryFeeShare(feeShare);
+        const validatorMetrics = new Map<bigint, ValidatorMetrics>();
+        validatorMetrics.set(1n, new ValidatorMetrics(0, 0, 100, originatedTxsFee1));
+        validatorMetrics.set(2n, new ValidatorMetrics(0, 0, 100, originatedTxsFee2));
+        await this.blockchainNode.sealEpoch(100, validatorMetrics);
+
+        const treasuryBalance = await ethers.provider.getBalance(treasury);
+        expect (treasuryBalance).to.equal(expectedTreasuryIncrease);
+        expect(await this.sfc.totalSupply()).to.equal(this.totalSupply - originatedTxsFee + treasuryBalance);
+      });
+
       it('Rejects to resolve when treasury is not set', async function () {
         await expect(this.sfc.resolveTreasuryFees()).to.be.revertedWithCustomError(this.sfc, 'TreasuryNotSet');
       });
@@ -545,7 +576,7 @@ describe('SFC', () => {
         );
       });
 
-      it('Resolves treasury fees', async function () {
+      it('Resolves unresolved treasury fees', async function () {
         // set treasury as failing receiver to trigger treasury fee accumulation
         const failingReceiver = await ethers.deployContract('FailingReceiver');
         await this.sfc.connect(this.owner).updateTreasuryAddress(failingReceiver);

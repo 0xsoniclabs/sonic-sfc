@@ -18,6 +18,8 @@ describe('SFC', () => {
 
     // initialize the sfc
     await sfc.initialize(epoch, supply, nodeDriver, constsManager, owner);
+    await sfc.connect(owner).initializeV2();
+    await sfc.connect(owner).initializeV3(0n);
 
     return {
       owner,

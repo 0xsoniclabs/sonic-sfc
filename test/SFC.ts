@@ -51,6 +51,9 @@ describe('SFC', () => {
       ]);
     }
 
+    // Set zero address balance to clean its balance after NodeDriver tests
+    await ethers.provider.send('hardhat_setBalance', [ethers.ZeroAddress, '0x0']);
+
     return {
       owner,
       user,
@@ -79,7 +82,7 @@ describe('SFC', () => {
     Object.assign(this, await loadFixture(fixture));
   });
 
-  it('Should revert when amount sent', async function () {
+  it('Should revert for money transfer', async function () {
     await expect(
       this.owner.sendTransaction({
         to: this.sfc,
@@ -88,18 +91,48 @@ describe('SFC', () => {
     ).to.revertedWithCustomError(this.sfc, 'TransfersNotAllowed');
   });
 
+  describe('Initialization of totalSupply after upgrade', async function () {
+    it('Allows to reinitialize totalSupply after upgrade', async function () {
+      const burnedManually = 1000n; // included in this.totalSupply
+      const burnedViaSfc = 500n; // not included in this.totalSupply
+      const expectedTotalSupply = this.totalSupply - burnedManually;
+      await this.owner.sendTransaction({ to: ethers.ZeroAddress, value: burnedManually + burnedViaSfc });
+
+      // After the upgrade, SFC reports total supply deducted by the zero address balance
+      expect(await this.sfc.totalSupply()).to.equal(this.totalSupply - (burnedManually + burnedViaSfc));
+
+      // After V2 initialization, total supply reported by SFC matches with the originally reported one
+      await this.sfc.connect(this.owner).initializeV2();
+      expect(await this.sfc.totalSupply()).to.equal(this.totalSupply);
+
+      // V3 initialization allows to eliminate manually burned tokens from total supply
+      await this.sfc.connect(this.owner).initializeV3(burnedManually);
+      expect(await this.sfc.totalSupply()).to.equal(expectedTotalSupply);
+    });
+
+    it('Should revert when not owner', async function () {
+      await this.sfc.connect(this.user).initializeV2();
+      await expect(this.sfc.connect(this.user).initializeV3(100n)).to.be.revertedWithCustomError(
+        this.sfc,
+        'OwnableUnauthorizedAccount',
+      );
+    });
+
+    it('Should revert when already initialized', async function () {
+      await this.sfc.connect(this.owner).initializeV2();
+      await expect(this.sfc.connect(this.owner).initializeV2()).to.be.revertedWithCustomError(
+        this.sfc,
+        'InvalidInitialization',
+      );
+    });
+  });
+
   describe('Burning native tokens', () => {
     it('Should revert when no amount sent', async function () {
       await expect(this.sfc.connect(this.user).burnNativeTokens()).to.be.revertedWithCustomError(
         this.sfc,
         'ZeroAmount',
       );
-    });
-
-    it('Should revert when amount greater than total supply', async function () {
-      await expect(
-        this.sfc.connect(this.user).burnNativeTokens({ value: (await this.sfc.totalSupply()) + 1n }),
-      ).to.be.revertedWithCustomError(this.sfc, 'ValueTooLarge');
     });
 
     it('Should succeed and burn native tokens', async function () {
@@ -324,13 +357,14 @@ describe('SFC', () => {
       expect(await this.sfc.currentSealedEpoch()).to.equal(5);
     });
 
-    it('Sets endBlock of the epoch correctly', async function () {
+    it('Sets epoch snapshot correctly', async function () {
       const epochNumber = await this.sfc.currentEpoch();
       await this.sfcAsNode.sealEpoch([100, 101, 102], [100, 101, 102], [100, 101, 102], [100, 101, 102]);
       const lastBlock = await ethers.provider.getBlockNumber();
-      // endBlock is on second position
-      expect((await this.sfc.getEpochSnapshot(epochNumber))[1]).to.equal(lastBlock);
       expect(await this.sfc.getEpochEndBlock(epochNumber)).to.equal(lastBlock);
+      const snapshot = await this.sfc.getEpochSnapshot(epochNumber);
+      expect(snapshot[1]).to.equal(lastBlock); // endBlock
+      expect(snapshot[5]).to.equal(this.totalSupply); // totalSupply
     });
   });
 
@@ -531,7 +565,7 @@ describe('SFC', () => {
       await this.sfcAsNode.sealEpochValidators(allValidators);
     });
 
-    it("Decreases totalSupply by originated transaction fees", async function () {
+    it('Decreases totalSupply by originated transaction fees', async function () {
       const originatedTxsFee1 = 50n;
       const originatedTxsFee2 = 20n;
       const validatorMetrics = new Map<bigint, ValidatorMetrics>();
@@ -542,7 +576,7 @@ describe('SFC', () => {
     });
 
     describe('Treasury', () => {
-      it("Receives fee share while epoch sealing", async function () {
+      it('Receives fee share while epoch sealing', async function () {
         const treasury = ethers.Wallet.createRandom();
         await this.sfc.connect(this.owner).updateTreasuryAddress(treasury);
 
@@ -550,7 +584,7 @@ describe('SFC', () => {
         const originatedTxsFee1 = 600n;
         const originatedTxsFee2 = 400n;
         const originatedTxsFee = originatedTxsFee1 + originatedTxsFee2;
-        const expectedTreasuryIncrease = (originatedTxsFee  * feeShare) / BigInt(1e18);
+        const expectedTreasuryIncrease = (originatedTxsFee * feeShare) / BigInt(1e18);
 
         await this.constants.updateTreasuryFeeShare(feeShare);
         const validatorMetrics = new Map<bigint, ValidatorMetrics>();
@@ -559,7 +593,7 @@ describe('SFC', () => {
         await this.blockchainNode.sealEpoch(100, validatorMetrics);
 
         const treasuryBalance = await ethers.provider.getBalance(treasury);
-        expect (treasuryBalance).to.equal(expectedTreasuryIncrease);
+        expect(treasuryBalance).to.equal(expectedTreasuryIncrease);
         expect(await this.sfc.totalSupply()).to.equal(this.totalSupply - originatedTxsFee + treasuryBalance);
       });
 

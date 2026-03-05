@@ -65,6 +65,13 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
         return keccak256(abi.encodePacked("a", from));
     }
 
+    /// @notice Account-nonce sponsorships cover a specific transaction from a specific account.
+    /// @param from The sender of the transaction
+    /// @param nonce The transaction nonce
+    function accountNonceSponsorshipFundId(address from, uint256 nonce) public pure returns (bytes32) {
+        return keccak256(abi.encodePacked("an", from, nonce));
+    }
+
     /// @notice Contract sponsorships cover all transactions sent to a specific contract. All sponsorship requests for transactions targeting this contract will be covered.
     /// @param to The recipient of the transaction (the contract address)
     function contractSponsorshipFundId(address to) public pure returns (bytes32) {
@@ -175,6 +182,10 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
         uint256 fee
     ) public view returns (bytes32 fundId) {
         // Check all possible sponsorship funds in order of precedence.
+        fundId = accountNonceSponsorshipFundId(from, nonce);
+        if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
+            return fundId;
+        }
         fundId = accountOperationSponsorshipFundId(from, to, callData);
         if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
             return fundId;

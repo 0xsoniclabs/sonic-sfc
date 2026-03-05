@@ -103,6 +103,25 @@ describe('SubsidiesRegistry', () => {
       expect(choosenFundId).to.equal(noFundId);
     });
 
+    it('Calculates fundId for account sponsorship', async function () {
+      const from = ethers.Wallet.createRandom();
+      const to = ethers.Wallet.createRandom();
+      const expectedFundId = await this.registry.accountSponsorshipFundId(from);
+      await this.registry.sponsor(expectedFundId, { value: 10 });
+      const chosenFundId = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
+      expect(chosenFundId).to.equal(expectedFundId);
+    });
+
+    it('Calculates fundId for account-nonce sponsorship', async function () {
+      const from = ethers.Wallet.createRandom();
+      const to = ethers.Wallet.createRandom();
+      const nonce = 123;
+      const expectedFundId = await this.registry.accountNonceSponsorshipFundId(from, nonce);
+      await this.registry.sponsor(expectedFundId, { value: 10 });
+      const chosenFundId = await this.registry.chooseFund(from, to, 5, nonce, '0x', 5);
+      expect(chosenFundId).to.equal(expectedFundId);
+    });
+
     it('Calculates fundId for contract sponsorship', async function () {
       const from = ethers.Wallet.createRandom();
       const to = ethers.Wallet.createRandom();

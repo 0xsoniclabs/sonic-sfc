@@ -69,30 +69,79 @@ describe('SubsidiesRegistry', () => {
     );
   });
 
-  it('Allows proportional withdrawal after a partial spend', async function () {
-    const fundId = '0x0000000000000000000000000000000000000000000000000000000000000024';
-    const [sponsorA, sponsorB] = await ethers.getSigners();
+  describe('Withdrawal', async function () {
+    it('Allow to withdraw only what inserted', async function () {
+      const fundId = '0x0000000000000000000000000000000000000000000000000000000000000033';
+      // insert 100, try to withdraw 500, should only withdraw 100
+      await this.registry.connect(this.sponsor).sponsor(fundId, { value: 100 });
+      expect(await this.registry.connect(this.sponsor).withdraw(fundId, 500))
+        .to.emit(this.registry, 'Withdrawn')
+        .withArgs(fundId, this.sponsor, 100);
+      // another withdrawal should fail, nothing left to withdraw
+      await expect(this.registry.connect(this.sponsor).withdraw(fundId, 500)).to.be.revertedWithCustomError(
+        this.registry,
+        'NothingToWithdraw',
+      );
+    });
 
-    // Sponsor A deposits 100
-    await this.registry.connect(sponsorA).sponsor(fundId, { value: 100 });
-    // Sponsor B deposits 200
-    await this.registry.connect(sponsorB).sponsor(fundId, { value: 200 });
-    expect(await this.registry.getSponsorContribution(fundId, sponsorA)).to.equal(100);
-    expect(await this.registry.getSponsorContribution(fundId, sponsorB)).to.equal(200);
+    it('Allows proportional withdrawal after a partial spend', async function () {
+      const fundId = '0x0000000000000000000000000000000000000000000000000000000000000024';
+      const [sponsorA, sponsorB] = await ethers.getSigners();
 
-    await this.registry.connect(this.node).deductFees(fundId, 30);
+      // Sponsor A deposits 100
+      await this.registry.connect(sponsorA).sponsor(fundId, { value: 100 });
+      // Sponsor B deposits 200
+      await this.registry.connect(sponsorB).sponsor(fundId, { value: 200 });
+      expect(await this.registry.getSponsorContribution(fundId, sponsorA)).to.equal(100);
+      expect(await this.registry.getSponsorContribution(fundId, sponsorB)).to.equal(200);
 
-    // Now sponsorA should be able to withdraw max 90 (100 - 10% of 100)
-    const withdrawableA = await this.registry.availableToWithdraw(fundId, sponsorA);
-    expect(withdrawableA).to.equal(90);
-    await this.registry.connect(sponsorA).withdraw(fundId, withdrawableA);
-    expect(await this.registry.getSponsorContribution(fundId, sponsorA)).to.equal(0);
+      await this.registry.connect(this.node).deductFees(fundId, 30);
 
-    // SponsorB should be able to withdraw max 180 (200 - 10% of 200)
-    const withdrawableB = await this.registry.availableToWithdraw(fundId, sponsorB);
-    expect(withdrawableB).to.equal(180);
-    await this.registry.connect(sponsorB).withdraw(fundId, withdrawableB);
-    expect(await this.registry.getSponsorContribution(fundId, sponsorB)).to.equal(0);
+      // Now sponsorA should be able to withdraw max 90 (100 - 10% of 100)
+      const withdrawableA = await this.registry.availableToWithdraw(fundId, sponsorA);
+      expect(withdrawableA).to.equal(90);
+      await expect(this.registry.connect(sponsorA).withdraw(fundId, withdrawableA))
+        .to.emit(this.registry, 'Withdrawn')
+        .withArgs(fundId, sponsorA, withdrawableA);
+      expect(await this.registry.getSponsorContribution(fundId, sponsorA)).to.equal(0);
+
+      // SponsorB should be able to withdraw max 180 (200 - 10% of 200)
+      const withdrawableB = await this.registry.availableToWithdraw(fundId, sponsorB);
+      expect(withdrawableB).to.equal(180);
+      await expect(this.registry.connect(sponsorB).withdraw(fundId, withdrawableB))
+        .to.emit(this.registry, 'Withdrawn')
+        .withArgs(fundId, sponsorB, withdrawableB);
+      expect(await this.registry.getSponsorContribution(fundId, sponsorB)).to.equal(0);
+    });
+
+    it('Rounding should not allow sponsor to extract more than proportional share', async function () {
+      const fundId = '0x0000000000000000000000000000000000000000000000000000000000000099';
+      const [, , sponsorA, sponsorB] = await ethers.getSigners();
+
+      // sponsorA deposits 10 wei, sponsorB deposits 7 wei — total contributions = 17
+      await this.registry.connect(sponsorA).sponsor(fundId, { value: 10 });
+      await this.registry.connect(sponsorB).sponsor(fundId, { value: 7 });
+
+      // Deduct 7 wei in fees: available = 10, totalContributions = 17
+      await this.registry.connect(this.node).deductFees(fundId, 7);
+
+      // sponsorA's fair proportional share = floor(10 * 10 / 17) = 5
+      const singleShotMax = await this.registry.availableToWithdraw(fundId, sponsorA);
+      expect(singleShotMax).to.equal(5n);
+
+      // sponsorA exploits integer rounding by making many 1-wei withdrawals.
+      // Each call rounds down toSubtract, so sponsorA loses less contribution
+      // credit than they should — allowing them to come back for more.
+      for (let i = 0; i < 5; i++) {
+        await this.registry.connect(sponsorA).withdraw(fundId, 1);
+      }
+
+      // sponsorA should not be able to withdraw more
+      await expect(this.registry.connect(sponsorA).withdraw(fundId, 1)).to.be.revertedWithCustomError(
+        this.registry,
+        'NothingToWithdraw',
+      );
+    });
   });
 
   describe('chooseFund', async function () {

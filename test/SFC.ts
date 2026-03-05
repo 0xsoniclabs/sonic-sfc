@@ -298,16 +298,17 @@ describe('SFC', () => {
   });
 
   describe('Epoch sealing', () => {
-    const validatorsFixture = async function (this: Context) {
-      await this.sfc.connect(this.validator1).createValidator(this.pubKey1, { value: ethers.parseEther('100000') });
-      await this.sfc.connect(this.delegator1).delegate(1, { value: ethers.parseEther('11') });
-      await this.sfc.connect(this.delegator2).delegate(1, { value: ethers.parseEther('8') });
-      await this.sfc.connect(this.delegator3).delegate(1, { value: ethers.parseEther('8') });
-      return {};
+    const validatorsFixture = async () => {
+      const ctx = await fixture();
+      await ctx.sfc.connect(ctx.validator1).createValidator(ctx.pubKey1, { value: ethers.parseEther('100000') });
+      await ctx.sfc.connect(ctx.delegator1).delegate(1, { value: ethers.parseEther('11') });
+      await ctx.sfc.connect(ctx.delegator2).delegate(1, { value: ethers.parseEther('8') });
+      await ctx.sfc.connect(ctx.delegator3).delegate(1, { value: ethers.parseEther('8') });
+      return ctx;
     };
 
     beforeEach(async function () {
-      return Object.assign(this, await loadFixture(validatorsFixture.bind(this)));
+      return Object.assign(this, await loadFixture(validatorsFixture));
     });
 
     it('Increments current epoch/current sealed epoch number', async function () {
@@ -414,33 +415,35 @@ describe('SFC', () => {
   });
 
   describe('Staking', () => {
-    const validatorsFixture = async function (this: Context) {
-      const blockchainNode = new BlockchainNode(this.sfcAsNode);
+    const validatorsFixture = async () => {
+      const ctx = await fixture();
+      const blockchainNode = new BlockchainNode(ctx.sfcAsNode);
 
       await blockchainNode.handleTx(
-        await this.sfc.connect(this.validator1).createValidator(this.pubKey1, { value: ethers.parseEther('400000') }),
+        await ctx.sfc.connect(ctx.validator1).createValidator(ctx.pubKey1, { value: ethers.parseEther('400000') }),
       );
       await blockchainNode.handleTx(
-        await this.sfc.connect(this.validator2).createValidator(this.pubKey2, { value: ethers.parseEther('800000') }),
+        await ctx.sfc.connect(ctx.validator2).createValidator(ctx.pubKey2, { value: ethers.parseEther('800000') }),
       );
       await blockchainNode.handleTx(
-        await this.sfc.connect(this.validator3).createValidator(this.pubKey3, { value: ethers.parseEther('800000') }),
+        await ctx.sfc.connect(ctx.validator3).createValidator(ctx.pubKey3, { value: ethers.parseEther('800000') }),
       );
 
-      await this.sfc.connect(this.validator1).delegate(1, { value: ethers.parseEther('400000') });
-      await this.sfc.connect(this.delegator1).delegate(1, { value: ethers.parseEther('400000') });
-      await this.sfc.connect(this.delegator2).delegate(2, { value: ethers.parseEther('400000') });
+      await ctx.sfc.connect(ctx.validator1).delegate(1, { value: ethers.parseEther('400000') });
+      await ctx.sfc.connect(ctx.delegator1).delegate(1, { value: ethers.parseEther('400000') });
+      await ctx.sfc.connect(ctx.delegator2).delegate(2, { value: ethers.parseEther('400000') });
 
-      await this.constants.updateValidatorCommission(ethers.parseEther('0.2'));
+      await ctx.constants.updateValidatorCommission(ethers.parseEther('0.2'));
       await blockchainNode.sealEpoch(0);
 
       return {
+        ...ctx,
         blockchainNode,
       };
     };
 
     beforeEach(async function () {
-      return Object.assign(this, await loadFixture(validatorsFixture.bind(this)));
+      return Object.assign(this, await loadFixture(validatorsFixture));
     });
 
     it('Updates stashedRewardsUntilEpoch while claiming rewards', async function () {
@@ -679,28 +682,30 @@ describe('SFC', () => {
   });
 
   describe('Rewarding and Withdrawing', () => {
-    const validatorsFixture = async function (this: Context) {
-      const blockchainNode = new BlockchainNode(this.sfcAsNode);
+    const validatorsFixture = async () => {
+      const ctx = await fixture();
+      const blockchainNode = new BlockchainNode(ctx.sfcAsNode);
 
-      await this.constants.updateBaseRewardPerSecond(ethers.parseEther('1'));
+      await ctx.constants.updateBaseRewardPerSecond(ethers.parseEther('1'));
 
       await blockchainNode.handleTx(
-        await this.sfc.connect(this.validator1).createValidator(this.pubKey1, { value: ethers.parseEther('500000') }),
+        await ctx.sfc.connect(ctx.validator1).createValidator(ctx.pubKey1, { value: ethers.parseEther('500000') }),
       );
       await blockchainNode.handleTx(
-        await this.sfc.connect(this.validator2).createValidator(this.pubKey2, { value: ethers.parseEther('300000') }),
+        await ctx.sfc.connect(ctx.validator2).createValidator(ctx.pubKey2, { value: ethers.parseEther('300000') }),
       );
       await blockchainNode.handleTx(
-        await this.sfc.connect(this.validator3).createValidator(this.pubKey3, { value: ethers.parseEther('200000') }),
+        await ctx.sfc.connect(ctx.validator3).createValidator(ctx.pubKey3, { value: ethers.parseEther('200000') }),
       );
 
       return {
+        ...ctx,
         blockchainNode,
       };
     };
 
     beforeEach(async function () {
-      return Object.assign(this, await loadFixture(validatorsFixture.bind(this)));
+      return Object.assign(this, await loadFixture(validatorsFixture));
     });
 
     describe('Rewards and Withdrawals', () => {
@@ -798,14 +803,15 @@ describe('SFC', () => {
     });
 
     describe('Withdraw slashed', () => {
-      const configureFixture = async function (this: Context) {
-        await this.constants.updateWithdrawalPeriodTime(3600);
-        await this.constants.updateWithdrawalPeriodEpochs(2);
-        return {};
+      const configureFixture = async () => {
+        const ctx = await validatorsFixture();
+        await ctx.constants.updateWithdrawalPeriodTime(3600);
+        await ctx.constants.updateWithdrawalPeriodEpochs(2);
+        return ctx;
       };
 
       beforeEach(async function () {
-        return Object.assign(this, await loadFixture(configureFixture.bind(this)));
+        return Object.assign(this, await loadFixture(configureFixture));
       });
 
       it('Rejects to withdraw after a doublesign', async function () {
@@ -853,24 +859,26 @@ describe('SFC', () => {
   });
 
   describe('Average uptime calculation', () => {
-    const validatorsFixture = async function (this: Context) {
-      const blockchainNode = new BlockchainNode(this.sfcAsNode);
+    const validatorsFixture = async () => {
+      const ctx = await fixture();
+      const blockchainNode = new BlockchainNode(ctx.sfcAsNode);
 
-      await this.constants.updateAverageUptimeEpochWindow(10);
+      await ctx.constants.updateAverageUptimeEpochWindow(10);
 
       await blockchainNode.handleTx(
-        await this.sfc.connect(this.validator1).createValidator(this.pubKey1, { value: ethers.parseEther('100000') }),
+        await ctx.sfc.connect(ctx.validator1).createValidator(ctx.pubKey1, { value: ethers.parseEther('100000') }),
       );
 
       await blockchainNode.sealEpoch(0);
 
       return {
+        ...ctx,
         blockchainNode,
       };
     };
 
     beforeEach(async function () {
-      return Object.assign(this, await loadFixture(validatorsFixture.bind(this)));
+      return Object.assign(this, await loadFixture(validatorsFixture));
     });
 
     it('Should calculate uptime correctly', async function () {
@@ -926,8 +934,9 @@ describe('SFC', () => {
   });
 
   describe('Extra rewards distribution', () => {
-    const validatorsFixture = async function (this: Context) {
-      const blockchainNode = new BlockchainNode(this.sfcAsNode);
+    const validatorsFixture = async () => {
+      const ctx = await fixture();
+      const blockchainNode = new BlockchainNode(ctx.sfcAsNode);
 
       const signers = await ethers.getSigners();
       for (let i = 1; i <= 10; i++) {
@@ -940,19 +949,20 @@ describe('SFC', () => {
         ]);
 
         await blockchainNode.handleTx(
-          await this.sfc.connect(signers[i]).createValidator(pubKey, { value: ethers.parseEther(stake.toString()) }),
+          await ctx.sfc.connect(signers[i]).createValidator(pubKey, { value: ethers.parseEther(stake.toString()) }),
         );
       }
       await blockchainNode.sealEpoch(0); // empty genesis epoch
       await blockchainNode.sealEpoch(0); // sealed with the vals above
 
       return {
+        ...ctx,
         blockchainNode,
       };
     };
 
     beforeEach(async function () {
-      return Object.assign(this, await loadFixture(validatorsFixture.bind(this)));
+      return Object.assign(this, await loadFixture(validatorsFixture));
     });
 
     it('Should reject extra rewards for unsealed epoch', async function () {

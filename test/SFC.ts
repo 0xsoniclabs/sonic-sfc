@@ -1096,4 +1096,53 @@ describe('SFC', () => {
       await tryToDistributeRewards.bind(this)(2, true);
     });
   });
+
+  it('Keeps storage layout unchanged', async function () {
+    // check expected values are set in storage slots to make sure the layout is unchanged
+    await this.sfc.connect(this.owner).updateTreasuryAddress('0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266');
+    await this.sfc.connect(this.owner).setRedirectionAuthorizer('0x0F302Bc50e76b2d914e501a036fD6c13e95C86b1');
+    await this.sfc.connect(this.validator1).createValidator(this.pubKey1, { value: ethers.parseEther('200000') });
+    const blockchainNode = new BlockchainNode(this.sfcAsNode);
+    await blockchainNode.sealEpoch(1_000);
+
+    // lastValidatorID
+    expect(
+      await ethers.provider.getStorage(this.sfc, '0x0000000000000000000000000000000000000000000000000000000000000005'),
+    ).to.equal('0x0000000000000000000000000000000000000000000000000000000000000001');
+    // totalSupply
+    expect(
+      await ethers.provider.getStorage(this.sfc, '0x000000000000000000000000000000000000000000000000000000000000000d'),
+    ).to.equal('0x0000000000000000000000000000000000000000000422ca8b0a00a425000000');
+    // treasuryAddress
+    expect(
+      await ethers.provider.getStorage(this.sfc, '0x0000000000000000000000000000000000000000000000000000000000000010'),
+    ).to.equal('0x000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266');
+    // redirectionAuthorizer
+    expect(
+      await ethers.provider.getStorage(this.sfc, '0x0000000000000000000000000000000000000000000000000000000000000014'),
+    ).to.equal('0x0000000000000000000000000f302bc50e76b2d914e501a036fd6c13e95c86b1');
+    // getValidatorPubkey
+    expect(
+      await ethers.provider.getStorage(this.sfc, '0x210afe6ebef982fa193bb4e17f9f236cdf09af7788627b5d54d9e3e4b100021b'),
+    ).to.equal('0xc0040220af695ae100c370c7acff4f57e5a0c507abbbc8ac6cc2ae0ce3a81747');
+    expect(
+      await ethers.provider.getStorage(this.sfc, '0x210afe6ebef982fa193bb4e17f9f236cdf09af7788627b5d54d9e3e4b100021c'),
+    ).to.equal('0xe0cd3c6892233faae1af5d982d05b1c13a0ad4449685f0b5a6138b301cc5263f');
+    expect(
+      await ethers.provider.getStorage(this.sfc, '0x210afe6ebef982fa193bb4e17f9f236cdf09af7788627b5d54d9e3e4b100021d'),
+    ).to.equal('0x8316000000000000000000000000000000000000000000000000000000000000');
+    // pubkeyAddressToValidatorID
+    expect(
+      await ethers.provider.getStorage(this.sfc, '0xb15a614a61ee91c5ecfa8fe23bfe96ecd6f4021a59bb1a9cae4ac05311ea75c3'),
+    ).to.equal('0x0000000000000000000000000000000000000000000000000000000000000001');
+
+    // snapshot.baseRewardPerSecond
+    expect(
+      await ethers.provider.getStorage(this.sfc, '0xa7c5ba7114a813b50159add3a36832908dc83db71d0b9a24c2ad0f83be958212'),
+    ).to.equal('0x00000000000000000000000000000000000000000000000000000000000003e8');
+    // snapshot.totalSupply
+    expect(
+      await ethers.provider.getStorage(this.sfc, '0xa7c5ba7114a813b50159add3a36832908dc83db71d0b9a24c2ad0f83be958214'),
+    ).to.equal('0x0000000000000000000000000000000000000000000422ca8b0a00a425000000');
+  });
 });

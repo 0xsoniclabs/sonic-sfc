@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.27;
 
-import {ISFC} from "../interfaces/ISFC.sol";
-import {ISubsidiesRegistry} from "../interfaces/ISubsidiesRegistry.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ISFC} from "../interfaces/ISFC.sol";
+import {ISubsidiesRegistry} from "../interfaces/ISubsidiesRegistry.sol";
+import {Version} from "../version/Version.sol";
 
 /**
  * @title Subsidies Registry Interface
  * @notice Registry managing transaction sponsoring funds.
  * @custom:security-contact security@fantom.foundation
  */
-contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgradeable, PausableUpgradeable {
+contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgradeable, PausableUpgradeable, Version {
     struct Fund {
         uint256 available;
         uint256 totalContributions;

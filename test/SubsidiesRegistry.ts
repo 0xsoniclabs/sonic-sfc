@@ -103,6 +103,25 @@ describe('SubsidiesRegistry', () => {
       expect(choosenFundId).to.equal(noFundId);
     });
 
+    it('Calculates fundId for account sponsorship', async function () {
+      const from = ethers.Wallet.createRandom();
+      const to = ethers.Wallet.createRandom();
+      const expectedFundId = await this.registry.accountSponsorshipFundId(from);
+      await this.registry.sponsor(expectedFundId, { value: 10 });
+      const chosenFundId = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
+      expect(chosenFundId).to.equal(expectedFundId);
+    });
+
+    it('Calculates fundId for account-nonce sponsorship', async function () {
+      const from = ethers.Wallet.createRandom();
+      const to = ethers.Wallet.createRandom();
+      const nonce = 123;
+      const expectedFundId = await this.registry.accountNonceSponsorshipFundId(from, nonce);
+      await this.registry.sponsor(expectedFundId, { value: 10 });
+      const chosenFundId = await this.registry.chooseFund(from, to, 5, nonce, '0x', 5);
+      expect(chosenFundId).to.equal(expectedFundId);
+    });
+
     it('Calculates fundId for contract sponsorship', async function () {
       const from = ethers.Wallet.createRandom();
       const to = ethers.Wallet.createRandom();
@@ -184,6 +203,23 @@ describe('SubsidiesRegistry', () => {
     });
   });
 
+  it('Enforce pause', async function () {
+    await this.registry.connect(this.owner).pause();
+    const fundId = '0x0000000000000000000000000000000000000000000000000000000000000123';
+    await expect(this.registry.connect(this.sponsor).sponsor(fundId, { value: 100 })).to.be.revertedWithCustomError(
+      this.registry,
+      'EnforcedPause',
+    );
+    await expect(this.registry.connect(this.sponsor).withdraw(fundId, 10)).to.be.revertedWithCustomError(
+      this.registry,
+      'EnforcedPause',
+    );
+    await this.registry.connect(this.owner).unpause();
+    await expect(this.registry.connect(this.sponsor).sponsor(fundId, { value: 100 }))
+      .to.emit(this.registry, 'Sponsored')
+      .withArgs(fundId, this.sponsor, 100);
+  });
+
   it('Enforce ownerOnly', async function () {
     const anyAddress = ethers.Wallet.createRandom();
     expect(this.registry.upgradeToAndCall(anyAddress, '0x')).to.be.revertedWithCustomError(
@@ -198,6 +234,8 @@ describe('SubsidiesRegistry', () => {
       this.registry,
       'OwnableUnauthorizedAccount',
     );
+    expect(this.registry.pause()).to.be.revertedWithCustomError(this.registry, 'OwnableUnauthorizedAccount');
+    expect(this.registry.unpause()).to.be.revertedWithCustomError(this.registry, 'OwnableUnauthorizedAccount');
 
     await this.registry.connect(this.owner).setChooseFundGasLimit(123);
     await this.registry.connect(this.owner).setDeductFeesGasLimit(123);

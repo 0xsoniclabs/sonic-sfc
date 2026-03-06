@@ -105,8 +105,8 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
         uint256 totalSupply; // total supply of native tokens
     }
 
-    // the total supply of native tokens in the chain
-    uint256 public totalSupply;
+    // The total supply of native tokens in the chain including tokens on zero address.
+    uint256 private totalSupplyWithBurned;
 
     // epoch id => epoch snapshot
     mapping(uint256 epoch => EpochSnapshot) public getEpochSnapshot;
@@ -250,8 +250,18 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
         currentSealedEpoch = sealedEpoch;
         node = NodeDriverAuth(nodeDriver);
         c = ConstantsManager(_c);
-        totalSupply = _totalSupply;
+        totalSupplyWithBurned = _totalSupply;
         getEpochSnapshot[sealedEpoch].endTime = _now();
+    }
+
+    function initializeV2() external reinitializer(2) {
+        // Transform totalSupply to totalSupplyWithBurned during upgrade
+        totalSupplyWithBurned += address(0).balance;
+    }
+
+    function initializeV3(uint256 burnedManually) external reinitializer(3) onlyOwner {
+        // Adjust totalSupply after the upgrade to eliminate tokens burned by transfer to zero address
+        totalSupplyWithBurned -= burnedManually;
     }
 
     /// Override the upgrade authorization check to allow upgrades only from the owner.
@@ -261,6 +271,15 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
     /// Receive fallback to revert transfers.
     receive() external payable {
         revert TransfersNotAllowed();
+    }
+
+    /// The total supply of native tokens in the chain.
+    function totalSupply() public view returns (uint256) {
+        uint256 burned = address(0).balance;
+        if (totalSupplyWithBurned < burned) {
+            return 0;
+        }
+        return totalSupplyWithBurned - burned;
     }
 
     /// Set admin address responsible for initiating redirections.
@@ -334,7 +353,7 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
         snapshot.endTime = _now();
         snapshot.endBlock = block.number;
         snapshot.baseRewardPerSecond = c.baseRewardPerSecond();
-        snapshot.totalSupply = totalSupply;
+        snapshot.totalSupply = totalSupply();
     }
 
     /// Finish epoch sealing - store validators of the new epoch into a snapshot.
@@ -473,7 +492,7 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
             revert ZeroAddress();
         }
         node.incBalance(c.issuedTokensRecipient(), amount);
-        totalSupply += amount;
+        totalSupplyWithBurned += amount;
     }
 
     /// Update treasury address.
@@ -876,10 +895,6 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
     /// The tokens are sent to the zero address.
     function _burnNativeTokens(uint256 amount) internal {
         if (amount != 0) {
-            if (amount > totalSupply) {
-                revert ValueTooLarge();
-            }
-            totalSupply -= amount;
             (bool sent, ) = payable(address(0)).call{value: amount}("");
             if (!sent) {
                 revert TransferFailed();
@@ -994,10 +1009,10 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
         }
 
         snapshot.epochFee = ctx.epochFee;
-        if (totalSupply > snapshot.epochFee) {
-            totalSupply -= snapshot.epochFee;
+        if (totalSupplyWithBurned > snapshot.epochFee) {
+            totalSupplyWithBurned -= snapshot.epochFee;
         } else {
-            totalSupply = 0;
+            totalSupplyWithBurned = 0;
         }
 
         // transfer 10% of fees to treasury
@@ -1137,7 +1152,7 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
     function _mintNativeToken(uint256 amount) internal {
         // balance will be increased after the transaction is processed
         node.incBalance(address(this), amount);
-        totalSupply = totalSupply + amount;
+        totalSupplyWithBurned = totalSupplyWithBurned + amount;
     }
 
     /// Sync validator with node.

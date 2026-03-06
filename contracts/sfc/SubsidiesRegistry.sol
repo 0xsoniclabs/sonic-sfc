@@ -259,10 +259,13 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
         require(amount != 0, NothingToWithdraw());
         require(tx.gasprice != 0, NotAllowedInSponsoredTx());
 
-        uint256 toSubstract = (amount * fund.totalContributions) / fund.available;
+        // Calculate the proportional amount to subtract from the sponsor's contribution record:
+        // Adding (fund.available - 1) before division simulates rounding up:
+        // toSubtract = ceil(amount * fund.totalContributions / fund.available)
+        uint256 toSubtract = (amount * fund.totalContributions + fund.available - 1) / fund.available;
         fund.available -= amount;
-        fund.contributors[msg.sender] -= toSubstract;
-        fund.totalContributions -= toSubstract;
+        fund.contributors[msg.sender] -= toSubtract;
+        fund.totalContributions -= toSubtract;
 
         (bool success, ) = msg.sender.call{value: amount}("");
         require(success, TransferFailed());

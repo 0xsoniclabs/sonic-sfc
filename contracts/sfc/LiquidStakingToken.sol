@@ -33,10 +33,6 @@ contract LiquidStakingToken is ERC20Upgradeable, OwnableUpgradeable, ReentrancyG
     uint256[] public validatorIds;
     mapping(uint256 validatorId => bool) public isWhitelisted;
 
-// ──────────────────────────────────────────────
-    // Events
-    // ──────────────────────────────────────────────
-
     event Invested(address indexed user, uint256 sAmount, uint256 lstAmount);
     event Redeemed(address indexed user, uint256 lstAmount, uint256 sAmount);
     event Restaked(uint256 totalRewards, uint256 burned, uint256 restaked);
@@ -45,10 +41,6 @@ contract LiquidStakingToken is ERC20Upgradeable, OwnableUpgradeable, ReentrancyG
     event ValidatorRemoved(uint256 indexed validatorId);
     event BurnRateUpdated(uint256 newBurnRate);
 
-    // ──────────────────────────────────────────────
-    // Errors
-    // ──────────────────────────────────────────────
-
     error NoValidators();
     error ValidatorAlreadyWhitelisted();
     error ValidatorNotWhitelisted();
@@ -56,11 +48,7 @@ contract LiquidStakingToken is ERC20Upgradeable, OwnableUpgradeable, ReentrancyG
     error NotSfc();
     error ZeroAmount();
     error TransferFailed();
-    error InsufficientStakeOnValidator();
-
-    // ──────────────────────────────────────────────
-    // Constructor & initializer
-    // ──────────────────────────────────────────────
+    error InsufficientStakeOnValidators();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -76,10 +64,6 @@ contract LiquidStakingToken is ERC20Upgradeable, OwnableUpgradeable, ReentrancyG
         sfc = ISFC(_sfc);
         burnRate = _burnRate;
     }
-
-    // ──────────────────────────────────────────────
-    // Admin
-    // ──────────────────────────────────────────────
 
     /// @notice Whitelist a validator for staking.
     function addValidator(uint256 validatorId) external onlyOwner {
@@ -113,10 +97,6 @@ contract LiquidStakingToken is ERC20Upgradeable, OwnableUpgradeable, ReentrancyG
         emit BurnRateUpdated(_burnRate);
     }
 
-    // ──────────────────────────────────────────────
-    // View helpers
-    // ──────────────────────────────────────────────
-
     /// @notice Total S value backing all outstanding LST.
     ///         Includes stakes held in SFC and liquid S held by this contract.
     ///         Automatically reflects slashing because it reads live SFC stake values.
@@ -145,10 +125,6 @@ contract LiquidStakingToken is ERC20Upgradeable, OwnableUpgradeable, ReentrancyG
         uint256 sSupply = totalLiquidStake();
         return (lstAmount * sSupply) / lstSupply;
     }
-
-    // ──────────────────────────────────────────────
-    // Core operations
-    // ──────────────────────────────────────────────
 
     /// @notice Deposit S tokens and receive LST representing the staked position.
     ///         The deposited S is delegated immediately to whitelisted validators.
@@ -248,10 +224,6 @@ contract LiquidStakingToken is ERC20Upgradeable, OwnableUpgradeable, ReentrancyG
         emit Rebalanced(fromValidator, toValidator, toMove);
     }
 
-    // ──────────────────────────────────────────────
-    // Internal helpers
-    // ──────────────────────────────────────────────
-
     /// @dev Returns the total received stake on a validator (from all delegators).
     function _getValidatorReceivedStake(uint256 validatorId) private view returns (uint256 receivedStake) {
         (, receivedStake,,,,,) = sfc.getValidator(validatorId);
@@ -296,39 +268,43 @@ contract LiquidStakingToken is ERC20Upgradeable, OwnableUpgradeable, ReentrancyG
         _undelegateEvenly(amount);
     }
 
-    /// @dev Undelegate `amount` from the single validator where we hold the most stake.
-    ///      Returns false (without reverting) if that validator does not have enough stake.
+    /// @dev Undelegate `amount` from the single validator with the highest total received stake
+    ///      that holds at least `amount` of our stake.
+    ///      Returns false (without reverting) if no such validator exists.
     function _undelegateFromSingleValidator(uint256 amount) internal returns (bool) {
         uint256 n = validatorIds.length;
-        uint256 maxStake = 0;
-        uint256 maxValidator = 0;
+        uint256 maxReceived = 0;
+        uint256 bestValidator = 0;
         for (uint256 i = 0; i < n; i++) {
-            uint256 s = sfc.getStake(address(this), validatorIds[i]);
-            if (s > maxStake) {
-                maxStake = s;
-                maxValidator = validatorIds[i];
+            uint256 receivedStake = _getValidatorReceivedStake(validatorIds[i]);
+            if (receivedStake > maxReceived) {
+                maxReceived = receivedStake;
+                bestValidator = validatorIds[i];
             }
         }
-        if (maxStake < amount) return false;
-        sfc.instantUndelegateAndWithdraw(maxValidator, amount);
+        if (bestValidator == 0) {
+            return false; // no validators
+        }
+        if (sfc.getStake(address(this), bestValidator) < amount) {
+            return false; // not enough stake on the best validator
+        }
+        sfc.instantUndelegateAndWithdraw(bestValidator, amount);
         return true;
     }
 
     /// @dev Undelegate `amount` evenly across all validators, capped at our stake on each.
     function _undelegateEvenly(uint256 amount) internal {
-        uint256 n = validatorIds.length;
-        uint256 perValidator = amount / n;
-        uint256 remainder = amount - perValidator * n;
+        uint256 validatorsCount = validatorIds.length;
         uint256 remaining = amount;
-        for (uint256 i = 0; i < n && remaining > 0; i++) {
+        for (uint256 i = 0; i < validatorsCount && remaining > 0; i++) {
+            uint256 toWithdraw = remaining / (validatorsCount - i);
             uint256 ourStake = sfc.getStake(address(this), validatorIds[i]);
-            uint256 toWithdraw = perValidator + (i == 0 ? remainder : 0);
             if (toWithdraw > ourStake) toWithdraw = ourStake;
             if (toWithdraw == 0) continue;
             sfc.instantUndelegateAndWithdraw(validatorIds[i], toWithdraw);
             remaining -= toWithdraw;
         }
-        if (remaining > 0) revert InsufficientStakeOnValidator();
+        if (remaining > 0) revert InsufficientStakeOnValidators();
     }
 
     /// @dev Only the owner can authorize an upgrade to a new implementation.

@@ -134,6 +134,9 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
     // delegator => withdrawals receiver
     mapping(address delegator => address receiver) public getRedirection;
 
+    // addresses allowed to withdraw immediately after undelegating (no time/epoch lock)
+    mapping(address delegator => bool) public instantWithdrawalAllowed;
+
     struct SealEpochRewardsCtx {
         uint256[] baseRewardWeights;
         uint256 totalBaseRewardWeight;
@@ -219,6 +222,7 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
     event ClaimedRewards(address indexed delegator, uint256 indexed toValidatorID, uint256 rewards);
     event RestakedRewards(address indexed delegator, uint256 indexed toValidatorID, uint256 rewards);
     event DistributedExtraRewards(uint256 indexed epochID, uint256 received, uint256 distributed);
+    event InstantWithdrawalAllowedUpdated(address indexed delegator, bool allowed);
     event BurntNativeTokens(uint256 amount);
     event UpdatedSlashingRefundRatio(uint256 indexed validatorID, uint256 refundRatio);
     event AnnouncedRedirection(address indexed from, address indexed to);
@@ -414,7 +418,48 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
     /// Withdraw stake from a validator after its un-delegation.
     /// Un-delegated stake is locked for a certain period of time.
     function withdraw(uint256 toValidatorID, uint256 wrID) public {
-        _withdraw(msg.sender, toValidatorID, wrID, _receiverOf(msg.sender));
+        address delegator = msg.sender;
+        WithdrawalRequest memory request = getWithdrawalRequest[delegator][toValidatorID][wrID];
+        if (request.epoch == 0) {
+            revert RequestNotExists();
+        }
+
+        uint256 requestTime = request.time;
+        uint256 requestEpoch = request.epoch;
+        if (
+            getValidator[toValidatorID].deactivatedTime != 0 &&
+            getValidator[toValidatorID].deactivatedTime < requestTime
+        ) {
+            requestTime = getValidator[toValidatorID].deactivatedTime;
+            requestEpoch = getValidator[toValidatorID].deactivatedEpoch;
+        }
+
+        if (_now() < requestTime + c.withdrawalPeriodTime()) {
+            revert NotEnoughTimePassed();
+        }
+        if (currentEpoch() < requestEpoch + c.withdrawalPeriodEpochs()) {
+            revert NotEnoughEpochsPassed();
+        }
+
+        delete getWithdrawalRequest[delegator][toValidatorID][wrID];
+        _withdraw(delegator, toValidatorID, wrID, request.amount, _receiverOf(delegator));
+    }
+
+    /// Undelegate and immediately withdraw stake in a single step.
+    /// Only allowed for addresses whitelisted via setInstantWithdrawalAllowed().
+    function instantUndelegateAndWithdraw(uint256 toValidatorID, uint256 amount) public {
+        if (!instantWithdrawalAllowed[msg.sender]) {
+            revert NotAuthorized();
+        }
+        if (amount == 0) {
+            revert ZeroAmount();
+        }
+        address delegator = msg.sender;
+        _stashRewards(delegator, toValidatorID);
+        _rawUndelegate(delegator, toValidatorID, amount, true, false, true);
+        _syncValidator(toValidatorID, false);
+        emit Undelegated(delegator, toValidatorID, 0, amount);
+        _withdraw(delegator, toValidatorID, 0, amount, _receiverOf(delegator));
     }
 
     /// Deactivate a validator.
@@ -484,6 +529,12 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
     /// Update consts address.
     function updateConstsAddress(address v) external onlyOwner {
         c = ConstantsManager(v);
+    }
+
+    /// @notice Allow or revoke instant withdrawal (no time/epoch lock) for a delegator address.
+    function setInstantWithdrawalAllowed(address delegator, bool allowed) external onlyOwner {
+        instantWithdrawalAllowed[delegator] = allowed;
+        emit InstantWithdrawalAllowedUpdated(delegator, allowed);
     }
 
     /// Update voteBook address.
@@ -722,36 +773,11 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
         return penalty;
     }
 
-    /// Withdraw stake from a validator.
-    /// The stake must be undelegated first.
-    function _withdraw(address delegator, uint256 toValidatorID, uint256 wrID, address payable receiver) private {
-        WithdrawalRequest memory request = getWithdrawalRequest[delegator][toValidatorID][wrID];
-        if (request.epoch == 0) {
-            revert RequestNotExists();
-        }
-
-        uint256 requestTime = request.time;
-        uint256 requestEpoch = request.epoch;
-        if (
-            getValidator[toValidatorID].deactivatedTime != 0 &&
-            getValidator[toValidatorID].deactivatedTime < requestTime
-        ) {
-            requestTime = getValidator[toValidatorID].deactivatedTime;
-            requestEpoch = getValidator[toValidatorID].deactivatedEpoch;
-        }
-
-        if (_now() < requestTime + c.withdrawalPeriodTime()) {
-            revert NotEnoughTimePassed();
-        }
-
-        if (currentEpoch() < requestEpoch + c.withdrawalPeriodEpochs()) {
-            revert NotEnoughEpochsPassed();
-        }
-
-        uint256 amount = getWithdrawalRequest[delegator][toValidatorID][wrID].amount;
+    /// Transfer withdrawn stake to receiver, applying any slashing penalty.
+    /// Callers are responsible for enforcing any withdrawal period.
+    function _withdraw(address delegator, uint256 toValidatorID, uint256 wrID, uint256 amount, address payable receiver) private {
         bool isCheater = isSlashed(toValidatorID);
         uint256 penalty = _getSlashingPenalty(amount, isCheater, slashingRefundRatio[toValidatorID]);
-        delete getWithdrawalRequest[delegator][toValidatorID][wrID];
 
         if (amount <= penalty) {
             revert StakeIsFullySlashed();

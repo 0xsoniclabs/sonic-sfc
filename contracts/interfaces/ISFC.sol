@@ -185,6 +185,12 @@ interface ISFC {
 
     function setGenesisDelegation(address delegator, uint256 toValidatorID, uint256 stake) external;
 
+    function instantWithdrawalAllowed(address delegator) external view returns (bool);
+
+    function setInstantWithdrawalAllowed(address delegator, bool allowed) external;
+
+    function instantUndelegateAndWithdraw(uint256 toValidatorID, uint256 amount) external;
+
     function updateStakeSubscriberAddress(address v) external;
 
     function stakeSubscriberAddress() external view returns (address);

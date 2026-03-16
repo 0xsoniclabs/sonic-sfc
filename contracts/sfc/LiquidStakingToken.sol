@@ -33,10 +33,7 @@ contract LiquidStakingToken is ERC20Upgradeable, OwnableUpgradeable, ReentrancyG
     uint256[] public validatorIds;
     mapping(uint256 validatorId => bool) public isWhitelisted;
 
-    /// Global counter used to generate unique wrIds for SFC undelegation requests.
-    uint256 public nextWrId;
-
-    // ──────────────────────────────────────────────
+// ──────────────────────────────────────────────
     // Events
     // ──────────────────────────────────────────────
 
@@ -245,9 +242,7 @@ contract LiquidStakingToken is ERC20Upgradeable, OwnableUpgradeable, ReentrancyG
         if (toMove > ourStake) toMove = ourStake;
         if (toMove == 0) return;
 
-        uint256 wrId = nextWrId++;
-        sfc.undelegate(fromValidator, wrId, toMove);
-        sfc.withdraw(fromValidator, wrId);
+        sfc.instantUndelegateAndWithdraw(fromValidator, toMove);
         sfc.delegate{value: toMove}(toValidator);
 
         emit Rebalanced(fromValidator, toValidator, toMove);
@@ -315,7 +310,7 @@ contract LiquidStakingToken is ERC20Upgradeable, OwnableUpgradeable, ReentrancyG
             }
         }
         if (maxStake < amount) return false;
-        _undelegate(maxValidator, amount);
+        sfc.instantUndelegateAndWithdraw(maxValidator, amount);
         return true;
     }
 
@@ -330,17 +325,10 @@ contract LiquidStakingToken is ERC20Upgradeable, OwnableUpgradeable, ReentrancyG
             uint256 toWithdraw = perValidator + (i == 0 ? remainder : 0);
             if (toWithdraw > ourStake) toWithdraw = ourStake;
             if (toWithdraw == 0) continue;
-            _undelegate(validatorIds[i], toWithdraw);
+            sfc.instantUndelegateAndWithdraw(validatorIds[i], toWithdraw);
             remaining -= toWithdraw;
         }
         if (remaining > 0) revert InsufficientStakeOnValidator();
-    }
-
-    /// @dev Undelegate and immediately withdraw `amount` from a validator.
-    function _undelegate(uint256 validatorId, uint256 amount) private {
-        uint256 wrId = nextWrId++;
-        sfc.undelegate(validatorId, wrId, amount);
-        sfc.withdraw(validatorId, wrId);
     }
 
     /// @dev Only the owner can authorize an upgrade to a new implementation.

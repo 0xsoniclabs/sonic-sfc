@@ -20,7 +20,7 @@ import {ISFC} from "../interfaces/ISFC.sol";
  */
 contract LiquidStakingToken is ERC20Upgradeable, OwnableUpgradeable, ReentrancyGuardUpgradeable, UUPSUpgradeable {
     /// Below this threshold a single validator is used; above it, stake is spread evenly.
-    uint256 public constant SMALL_STAKE_THRESHOLD = 1000 ether;
+    uint256 public constant SMALL_INVESTMENT_THRESHOLD = 1000 ether;
     /// Denominator for burn rate expressed in basis points (= 100%).
     uint256 public constant BURN_RATE_DENOMINATOR = 10000;
 
@@ -229,48 +229,57 @@ contract LiquidStakingToken is ERC20Upgradeable, OwnableUpgradeable, ReentrancyG
         (, receivedStake,,,,,) = sfc.getValidator(validatorId);
     }
 
-    /// @dev Small amounts go to the validator with the least total received stake.
-    ///      Large amounts are split evenly across all whitelisted validators.
+    /// @dev Small amounts go to a single validator; large amounts are split across all.
     function _delegateToValidators(uint256 amount) internal {
-        uint256 n = validatorIds.length;
-        if (n == 0) revert NoValidators();
+        if (validatorIds.length == 0) revert NoValidators();
 
-        if (amount < SMALL_STAKE_THRESHOLD || n == 1) {
-            uint256 minStake = type(uint256).max;
-            uint256 minValidator = validatorIds[0];
-            for (uint256 i = 0; i < n; i++) {
-                uint256 rs = _getValidatorReceivedStake(validatorIds[i]);
-                if (rs < minStake) {
-                    minStake = rs;
-                    minValidator = validatorIds[i];
-                }
-            }
-            sfc.delegate{value: amount}(minValidator);
+        if (amount < SMALL_INVESTMENT_THRESHOLD || validatorIds.length == 1) {
+            _delegateToSingleValidator(amount);
         } else {
-            uint256 perValidator = amount / n;
-            uint256 remainder = amount - perValidator * n;
-            for (uint256 i = 0; i < n; i++) {
-                sfc.delegate{value: perValidator + (i == 0 ? remainder : 0)}(validatorIds[i]);
+            _delegateToAllValidators(amount);
+        }
+    }
+
+    /// @dev Delegate `amount` to the validator with the least total received stake.
+    function _delegateToSingleValidator(uint256 amount) internal {
+        uint256 n = validatorIds.length;
+        uint256 minStake = type(uint256).max;
+        uint256 minValidator = validatorIds[0];
+        for (uint256 i = 0; i < n; i++) {
+            uint256 rs = _getValidatorReceivedStake(validatorIds[i]);
+            if (rs < minStake) {
+                minStake = rs;
+                minValidator = validatorIds[i];
             }
+        }
+        sfc.delegate{value: amount}(minValidator);
+    }
+
+    /// @dev Delegate `amount` evenly across all whitelisted validators.
+    function _delegateToAllValidators(uint256 amount) internal {
+        uint256 n = validatorIds.length;
+        uint256 perValidator = amount / n;
+        uint256 remainder = amount - perValidator * n;
+        for (uint256 i = 0; i < n; i++) {
+            sfc.delegate{value: perValidator + (i == 0 ? remainder : 0)}(validatorIds[i]);
         }
     }
 
     /// @dev For small amounts tries to undelegate from a single validator; falls back to
     ///      even split if that validator does not have enough. Large amounts always split evenly.
     function _undelegateFromValidators(uint256 amount) internal {
-        if (amount < SMALL_STAKE_THRESHOLD && validatorIds.length > 1) {
+        if (amount < SMALL_INVESTMENT_THRESHOLD && validatorIds.length > 1) {
             // fast path for small amounts - try to use only one validator
             if (_undelegateFromSingleValidator(amount)) {
                 return;
             }
         }
-        // slow path for big amounts or when a single validator does not have enough
-        _undelegateEvenly(amount);
+        // slow path for big amounts or when a single validator is not enough
+        _undelegateFromAllValidators(amount);
     }
 
-    /// @dev Undelegate `amount` from the single validator with the highest total received stake
-    ///      that holds at least `amount` of our stake.
-    ///      Returns false (without reverting) if no such validator exists.
+    /// @dev Undelegate `amount` from the single validator with the highest total received stake.
+    ///      Returns false if no validator with sufficient delegated stake exists.
     function _undelegateFromSingleValidator(uint256 amount) internal returns (bool) {
         uint256 n = validatorIds.length;
         uint256 maxReceived = 0;
@@ -292,19 +301,47 @@ contract LiquidStakingToken is ERC20Upgradeable, OwnableUpgradeable, ReentrancyG
         return true;
     }
 
-    /// @dev Undelegate `amount` evenly across all validators, capped at our stake on each.
-    function _undelegateEvenly(uint256 amount) internal {
+    /// @dev Undelegate `amount` from all validators, trying to balance received stake between validators.
+    function _undelegateFromAllValidators(uint256 amount) internal {
         uint256 validatorsCount = validatorIds.length;
-        uint256 remaining = amount;
-        for (uint256 i = 0; i < validatorsCount && remaining > 0; i++) {
-            uint256 toWithdraw = remaining / (validatorsCount - i);
-            uint256 ourStake = sfc.getStake(address(this), validatorIds[i]);
-            if (toWithdraw > ourStake) toWithdraw = ourStake;
-            if (toWithdraw == 0) continue;
-            sfc.instantUndelegateAndWithdraw(validatorIds[i], toWithdraw);
-            remaining -= toWithdraw;
+        uint256[] memory received = new uint256[](validatorsCount);
+        uint256[] memory ourStake = new uint256[](validatorsCount);
+        uint256 totalReceived = 0; // received stake of all whitelisted validators
+
+        for (uint256 i = 0; i < validatorsCount; i++) {
+            received[i] = _getValidatorReceivedStake(validatorIds[i]);
+            ourStake[i] = sfc.getStake(address(this), validatorIds[i]);
+            totalReceived += received[i];
         }
+
+        uint256 target = (totalReceived - amount) / validatorsCount;
+        uint256[] memory toWithdraw = new uint256[](validatorsCount);
+        uint256 remaining = amount;
+
+        for (uint256 i = 0; i < validatorsCount; i++) {
+            if (received[i] <= target) continue;
+            toWithdraw[i] = received[i] - target;
+            if (toWithdraw[i] > ourStake[i]) toWithdraw[i] = ourStake[i];
+            if (toWithdraw[i] > remaining) toWithdraw[i] = remaining;
+            remaining -= toWithdraw[i];
+        }
+
+        // Fallback: if our stake was concentrated on validators below target,
+        // cover the remainder by drawing additional stake in validator order.
+        for (uint256 i = 0; i < validatorsCount && remaining > 0; i++) {
+            uint256 available = ourStake[i] - toWithdraw[i];
+            uint256 extra = available < remaining ? available : remaining;
+            toWithdraw[i] += extra;
+            remaining -= extra;
+        }
+
         if (remaining > 0) revert InsufficientStakeOnValidators();
+
+        for (uint256 i = 0; i < validatorsCount; i++) {
+            if (toWithdraw[i] > 0) {
+                sfc.instantUndelegateAndWithdraw(validatorIds[i], toWithdraw[i]);
+            }
+        }
     }
 
     /// @dev Only the owner can authorize an upgrade to a new implementation.

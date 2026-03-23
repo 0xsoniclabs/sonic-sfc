@@ -74,10 +74,12 @@ contract LiquidStakingToken is ERC20Upgradeable, OwnableUpgradeable, ReentrancyG
     }
 
     /// @notice Remove a validator from the whitelist.
-    ///         Any existing stake on this validator remains; the protocol will stop
-    ///         adding new stake to it.
+    ///         Any existing stake on this validator is redistributed
+    ///         evenly among the remaining whitelisted validators.
     function removeValidator(uint256 validatorId) external onlyOwner {
         if (!isWhitelisted[validatorId]) revert ValidatorNotWhitelisted();
+
+        // unregister
         isWhitelisted[validatorId] = false;
         uint256 n = validatorIds.length;
         for (uint256 i = 0; i < n; i++) {
@@ -87,6 +89,16 @@ contract LiquidStakingToken is ERC20Upgradeable, OwnableUpgradeable, ReentrancyG
                 break;
             }
         }
+
+        // redistribute stake
+        uint256 stake = sfc.getStake(address(this), validatorId);
+        if (stake > 0) {
+            sfc.instantUndelegateAndWithdraw(validatorId, stake);
+            if (validatorIds.length > 0) {
+                _delegateToAllValidators(stake);
+            }
+        }
+
         emit ValidatorRemoved(validatorId);
     }
 

@@ -269,6 +269,19 @@ describe('SubsidiesRegistry', () => {
       .withArgs(fundId, this.sponsor, 100);
   });
 
+  it('Enforce pause for chooseFund', async function () {
+    const from = ethers.Wallet.createRandom();
+    const to = ethers.Wallet.createRandom();
+    const expectedFundId = await this.registry.contractSponsorshipFundId(to);
+    await this.registry.sponsor(expectedFundId, { value: 10 });
+    const choosenFundId = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
+    expect(choosenFundId).to.equal(expectedFundId);
+
+    await this.registry.connect(this.owner).pause();
+    const choosenFundIdPaused = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
+    expect(choosenFundIdPaused).to.equal(noFundId);
+  });
+
   it('Enforce ownerOnly', async function () {
     const anyAddress = ethers.Wallet.createRandom();
     expect(this.registry.upgradeToAndCall(anyAddress, '0x')).to.be.revertedWithCustomError(

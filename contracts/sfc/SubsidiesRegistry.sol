@@ -182,6 +182,9 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
         bytes calldata callData,
         uint256 fee
     ) public view returns (bytes32 fundId) {
+        if (paused()) {
+            return bytes32(0);
+        }
         // Check all possible sponsorship funds in order of precedence.
         fundId = accountNonceSponsorshipFundId(from, nonce);
         if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {

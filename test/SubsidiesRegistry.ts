@@ -3,6 +3,8 @@ import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
 import { expect } from 'chai';
 
 const noFundId = '0x0000000000000000000000000000000000000000000000000000000000000000';
+const SUBSIDY_MODE_NONE = 0n;
+const SUBSIDY_MODE_FUND = 1n;
 
 describe('SubsidiesRegistry', () => {
   const fixture = async () => {
@@ -148,7 +150,8 @@ describe('SubsidiesRegistry', () => {
     it('Returns zero for unknown tx', async function () {
       const from = ethers.Wallet.createRandom();
       const to = ethers.Wallet.createRandom();
-      const choosenFundId = await this.registry.connect(this.node).chooseFund(from, to, 5, 1, '0x', 5);
+      const [mode, choosenFundId] = await this.registry.connect(this.node).chooseFund(from, to, 5, 1, '0x', 5);
+      expect(mode).to.equal(SUBSIDY_MODE_NONE);
       expect(choosenFundId).to.equal(noFundId);
     });
 
@@ -157,7 +160,8 @@ describe('SubsidiesRegistry', () => {
       const to = ethers.Wallet.createRandom();
       const expectedFundId = await this.registry.accountSponsorshipFundId(from);
       await this.registry.sponsor(expectedFundId, { value: 10 });
-      const chosenFundId = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
+      const [mode, chosenFundId] = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
+      expect(mode).to.equal(SUBSIDY_MODE_FUND);
       expect(chosenFundId).to.equal(expectedFundId);
     });
 
@@ -167,7 +171,8 @@ describe('SubsidiesRegistry', () => {
       const nonce = 123;
       const expectedFundId = await this.registry.accountNonceSponsorshipFundId(from, nonce);
       await this.registry.sponsor(expectedFundId, { value: 10 });
-      const chosenFundId = await this.registry.chooseFund(from, to, 5, nonce, '0x', 5);
+      const [mode, chosenFundId] = await this.registry.chooseFund(from, to, 5, nonce, '0x', 5);
+      expect(mode).to.equal(SUBSIDY_MODE_FUND);
       expect(chosenFundId).to.equal(expectedFundId);
     });
 
@@ -176,7 +181,8 @@ describe('SubsidiesRegistry', () => {
       const to = ethers.Wallet.createRandom();
       const expectedFundId = await this.registry.contractSponsorshipFundId(to);
       await this.registry.sponsor(expectedFundId, { value: 10 });
-      const choosenFundId = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
+      const [mode, choosenFundId] = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
+      expect(mode).to.equal(SUBSIDY_MODE_FUND);
       expect(choosenFundId).to.equal(expectedFundId);
     });
 
@@ -193,7 +199,8 @@ describe('SubsidiesRegistry', () => {
         expect(expectedFundId).to.not.equal(noFundId);
 
         await this.registry.sponsor(expectedFundId, { value: 10 });
-        const choosenFundId = await this.registry.chooseFund(from, this.erc20, 0, 1, calldata, 5);
+        const [mode, choosenFundId] = await this.registry.chooseFund(from, this.erc20, 0, 1, calldata, 5);
+        expect(mode).to.equal(SUBSIDY_MODE_FUND);
         expect(choosenFundId).to.equal(expectedFundId);
       });
 
@@ -205,7 +212,8 @@ describe('SubsidiesRegistry', () => {
         const approveInterface = new ethers.Interface(['function approve(address spender, uint256 amount)']);
         const calldata = approveInterface.encodeFunctionData('approve', [spender.address, 10_000]);
 
-        const choosenFundId = await this.registry.chooseFund(from, to, 0, 1, calldata, 5);
+        const [mode, choosenFundId] = await this.registry.chooseFund(from, to, 0, 1, calldata, 5);
+        expect(mode).to.equal(SUBSIDY_MODE_NONE);
         expect(choosenFundId).to.equal(noFundId);
       });
 
@@ -274,11 +282,13 @@ describe('SubsidiesRegistry', () => {
     const to = ethers.Wallet.createRandom();
     const expectedFundId = await this.registry.contractSponsorshipFundId(to);
     await this.registry.sponsor(expectedFundId, { value: 10 });
-    const choosenFundId = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
+    const [mode, choosenFundId] = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
+    expect(mode).to.equal(SUBSIDY_MODE_FUND);
     expect(choosenFundId).to.equal(expectedFundId);
 
     await this.registry.connect(this.owner).pause();
-    const choosenFundIdPaused = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
+    const [modePaused, choosenFundIdPaused] = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
+    expect(modePaused).to.equal(SUBSIDY_MODE_NONE);
     expect(choosenFundIdPaused).to.equal(noFundId);
   });
 

@@ -6,7 +6,7 @@ import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/Pau
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISFC} from "../interfaces/ISFC.sol";
-import {ISubsidiesRegistry} from "../interfaces/ISubsidiesRegistry.sol";
+import {ISubsidiesRegistry, SUBSIDY_MODE_NONE, SUBSIDY_MODE_FUND} from "../interfaces/ISubsidiesRegistry.sol";
 import {Version} from "../version/Version.sol";
 
 /**
@@ -173,7 +173,8 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
     /// @param nonce Transaction nonce
     /// @param callData Transaction call data
     /// @param fee The transaction fee to be covered
-    /// @return fundId The fund to be used to fund the transaction, zero if not covered.
+    /// @return mode Sponsoring mode: SUBSIDY_MODE_FUND, SUBSIDY_MODE_TRACKED, or SUBSIDY_MODE_NONE.
+    /// @return payload Fund ID for SUBSIDY_MODE_FUND, tracking ID for SUBSIDY_MODE_TRACKED, zero otherwise.
     function chooseFund(
         address from,
         address to,
@@ -181,41 +182,47 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
         uint256 nonce,
         bytes calldata callData,
         uint256 fee
-    ) public view returns (bytes32 fundId) {
+    ) public view returns (uint256 mode, bytes32 payload) {
         if (paused()) {
-            return bytes32(0);
+            return (SUBSIDY_MODE_NONE, bytes32(0));
         }
         // Check all possible sponsorship funds in order of precedence.
-        fundId = accountNonceSponsorshipFundId(from, nonce);
-        if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
-            return fundId;
+        payload = accountNonceSponsorshipFundId(from, nonce);
+        if (payload != bytes32(0) && sponsorships[payload].available >= fee) {
+            return (SUBSIDY_MODE_FUND, payload);
         }
-        fundId = accountOperationSponsorshipFundId(from, to, callData);
-        if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
-            return fundId;
+        payload = accountOperationSponsorshipFundId(from, to, callData);
+        if (payload != bytes32(0) && sponsorships[payload].available >= fee) {
+            return (SUBSIDY_MODE_FUND, payload);
         }
-        fundId = approvalSponsorshipFundId(from, to, callData);
-        if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
-            return fundId;
+        payload = approvalSponsorshipFundId(from, to, callData);
+        if (payload != bytes32(0) && sponsorships[payload].available >= fee) {
+            return (SUBSIDY_MODE_FUND, payload);
         }
-        fundId = operationSponsorshipFundId(to, callData);
-        if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
-            return fundId;
+        payload = operationSponsorshipFundId(to, callData);
+        if (payload != bytes32(0) && sponsorships[payload].available >= fee) {
+            return (SUBSIDY_MODE_FUND, payload);
         }
-        fundId = bootstrapSponsorshipFundId(nonce);
-        if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
-            return fundId;
+        payload = bootstrapSponsorshipFundId(nonce);
+        if (payload != bytes32(0) && sponsorships[payload].available >= fee) {
+            return (SUBSIDY_MODE_FUND, payload);
         }
-        fundId = contractSponsorshipFundId(to);
-        if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
-            return fundId;
+        payload = contractSponsorshipFundId(to);
+        if (payload != bytes32(0) && sponsorships[payload].available >= fee) {
+            return (SUBSIDY_MODE_FUND, payload);
         }
-        fundId = accountSponsorshipFundId(from);
-        if (fundId != bytes32(0) && sponsorships[fundId].available >= fee) {
-            return fundId;
+        payload = accountSponsorshipFundId(from);
+        if (payload != bytes32(0) && sponsorships[payload].available >= fee) {
+            return (SUBSIDY_MODE_FUND, payload);
         }
         // No sponsorship found to cover the fee.
-        return bytes32(0);
+        return (SUBSIDY_MODE_NONE, bytes32(0));
+    }
+
+    /// @notice Report the gas fee consumed by a network-sponsored tracked transaction.
+    /// @dev Called from the zero address as an internal transaction.
+    function track(bytes32 /*trackingId*/, uint256 /*fee*/) external {
+        require(msg.sender == address(0), NotNode());
     }
 
     /// @notice Deduct transaction fees from a sponsorship fund.

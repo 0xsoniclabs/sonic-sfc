@@ -1,7 +1,6 @@
 import { ethers, upgrades } from 'hardhat';
 import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
 import { expect } from 'chai';
-import { BlockchainNode } from './helpers/BlockchainNode';
 
 const noFundId = '0x0000000000000000000000000000000000000000000000000000000000000000';
 const SUBSIDY_MODE_NONE = 0n;
@@ -261,7 +260,7 @@ describe('SubsidiesRegistry', () => {
     });
   });
 
-  it('Enforce pause', async function () {
+  it('Enforces pause', async function () {
     await this.registry.connect(this.owner).pause();
     const fundId = '0x0000000000000000000000000000000000000000000000000000000000000123';
     await expect(this.registry.connect(this.sponsor).sponsor(fundId, { value: 100 })).to.be.revertedWithCustomError(
@@ -341,9 +340,9 @@ describe('SubsidiesRegistry', () => {
     });
   });
 
-  it('Keeps storage layout unchanged', async function () {
-    // check expected values are set in storage slots to make sure the layout is unchanged
-    await this.registry.connect(this.owner).setChooseFundGasLimit(0x45b24);
+  it('Keeps existing storage layout unchanged', async function () {
+    // check expected values are set in storage slots to make sure existing slots are unchanged
+    await this.registry.setChooseFundGasLimit(0x45b24);
     await this.registry.connect(this.owner).setDeductFeesGasLimit(0xc0b00);
     const fundId = '0x0000000000000000000000000000000000000000000000000000000000012345';
     await this.registry.connect(this.sponsor).sponsor(fundId, { value: 100 });

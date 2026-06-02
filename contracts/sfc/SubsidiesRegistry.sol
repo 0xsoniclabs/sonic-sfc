@@ -6,7 +6,8 @@ import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/Pau
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISFC} from "../interfaces/ISFC.sol";
-import {ISubsidiesRegistry, SUBSIDY_MODE_NONE, SUBSIDY_MODE_FUND} from "../interfaces/ISubsidiesRegistry.sol";
+import {ISubsidiesRegistry, SUBSIDY_MODE_NONE, SUBSIDY_MODE_FUND, SUBSIDY_MODE_TRACKED} from "../interfaces/ISubsidiesRegistry.sol";
+import {ISubsidiesExtension} from "../interfaces/ISubsidiesExtension.sol";
 import {Version} from "../version/Version.sol";
 
 /**
@@ -34,8 +35,12 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
     /// @notice GasLimit to be used for deductFees() transactions.
     uint256 public deductFeesGasLimit;
 
+    /// @notice Optional delegate called when this contract cannot sponsor a transaction.
+    address public delegate;
+
     event Sponsored(bytes32 indexed fundId, address indexed sponsor, uint256 amount);
     event Withdrawn(bytes32 indexed fundId, address indexed sponsor, uint256 amount);
+    event DelegateChanged(address indexed newDelegate);
 
     error NotNode();
     error NotSponsored();
@@ -159,6 +164,7 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
 
     /// @notice Bootstrap sponsorships cover the first few transactions from a new account. This allows new users to get started without having to acquire native tokens first.
     /// @param nonce The transaction nonce
+    /// @return The bootstrap fund ID if nonce < 3, zero otherwise.
     function bootstrapSponsorshipFundId(uint256 nonce) public pure returns (bytes32) {
         if (nonce < 3) {
             return keccak256(abi.encodePacked("b"));
@@ -169,7 +175,7 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
     /// @notice Check if a transaction is covered by Gas Subsidies and return the fund to sponsor it.
     /// @param from Transaction sender
     /// @param to Transaction recipient (typically the called contract, zero for contract creation calls)
-    /// @param /*value*/ Transaction value (the money amount being sent to the recipient)
+    /// @param value Transaction value (the money amount being sent to the recipient)
     /// @param nonce Transaction nonce
     /// @param callData Transaction call data
     /// @param fee The transaction fee to be covered
@@ -178,11 +184,11 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
     function chooseFund(
         address from,
         address to,
-        uint256 /*value*/,
+        uint256 value,
         uint256 nonce,
         bytes calldata callData,
         uint256 fee
-    ) public view returns (uint256 mode, bytes32 payload) {
+    ) external view returns (uint256 mode, bytes32 payload) {
         if (paused()) {
             return (SUBSIDY_MODE_NONE, bytes32(0));
         }
@@ -215,28 +221,50 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
         if (payload != bytes32(0) && sponsorships[payload].available >= fee) {
             return (SUBSIDY_MODE_FUND, payload);
         }
-        // No sponsorship found to cover the fee.
+        if (delegate != address(0)) {
+            try ISubsidiesExtension(delegate).chooseFund(from, to, value, nonce, callData, fee) returns (
+                uint256 delegatedMode,
+                bytes32 delegatedPayload
+            ) {
+                return (delegatedMode, delegatedPayload);
+            } catch {
+                return (SUBSIDY_MODE_NONE, bytes32(0));
+            }
+        }
         return (SUBSIDY_MODE_NONE, bytes32(0));
     }
 
-    /// @notice Report the gas fee consumed by a network-sponsored tracked transaction.
-    /// @dev Called from the zero address as an internal transaction.
-    function track(bytes32 /*trackingId*/, uint256 /*fee*/) external {
-        require(msg.sender == address(0), NotNode());
+    /// @notice Consume one free transfer from the sender's token bucket after a sponsored transaction.
+    /// @dev To be called only by the Sonic node (from the zero address) when chooseFund returned SUBSIDY_MODE_TRACKED.
+    /// @param trackingId The tracking ID returned by chooseFund. A non-zero top byte means it was issued by the delegate.
+    function track(bytes32 trackingId, uint256 fee) external {
+        require(msg.sender == address(0), NotNode()); // must be called in an internal transaction
+        if (delegate != address(0)) {
+            ISubsidiesExtension(delegate).track(trackingId, fee);
+            return;
+        }
+        revert NotSponsored();
     }
 
     /// @notice Deduct transaction fees from a sponsorship fund.
-    /// @dev This function is intended to be called only by the Sonic node.
+    /// @dev To be called only by the Sonic node when chooseFund returns SUBSIDY_MODE_FUND.
     ///      Deducts the fee from the fund balance and burns the native tokens through SFC.
     /// @param fundId The unique identifier of the sponsorship fund.
     /// @param fee The fee amount to deduct (in wei).
-    function deductFees(bytes32 fundId, uint256 fee) public {
+    function deductFees(bytes32 fundId, uint256 fee) external {
         require(msg.sender == address(0), NotNode()); // must be called in an internal transaction
         require(fundId != bytes32(0), ZeroFundId());
         Fund storage fund = sponsorships[fundId];
-        require(fund.available >= fee, NotSponsored());
-        fund.available -= fee;
-        SFC.burnNativeTokens{value: fee}();
+        if (fund.available >= fee) {
+            fund.available -= fee;
+            SFC.burnNativeTokens{value: fee}();
+            return;
+        }
+        if (delegate != address(0)) {
+            ISubsidiesExtension(delegate).deductFees(fundId, fee);
+            return;
+        }
+        revert NotSponsored();
     }
 
     /// @notice Insert funds into a specified sponsorship fund.
@@ -357,6 +385,13 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
     /// @notice Unpause the contract, allowing sponsorships to be set up or withdrawn again.
     function unpause() external onlyOwner {
         _unpause();
+    }
+
+    /// @notice Set or clear the delegate called when this contract cannot sponsor a transaction.
+    function setDelegate(address newDelegate) external onlyOwner {
+        require(newDelegate == address(0) || newDelegate.code.length != 0, "delegate must be a contract");
+        delegate = newDelegate;
+        emit DelegateChanged(newDelegate);
     }
 
     /// Override the upgrade authorization check to allow upgrades only from the owner.

@@ -1,6 +1,7 @@
 import { ethers, upgrades } from 'hardhat';
 import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
 import { expect } from 'chai';
+import { BlockchainNode } from './helpers/BlockchainNode';
 
 const noFundId = '0x0000000000000000000000000000000000000000000000000000000000000000';
 const SUBSIDY_MODE_NONE = 0n;
@@ -338,5 +339,65 @@ describe('SubsidiesRegistry', () => {
         .connect(this.node)
         .deductFees(fundId, 90, { gasLimit: (this.config.deductFeesGasLimit / 10n) * 8n });
     });
+  });
+
+  it('Keeps storage layout unchanged', async function () {
+    // check expected values are set in storage slots to make sure the layout is unchanged
+    await this.registry.connect(this.owner).setChooseFundGasLimit(0x45b24);
+    await this.registry.connect(this.owner).setDeductFeesGasLimit(0xc0b00);
+    const fundId = '0x0000000000000000000000000000000000000000000000000000000000012345';
+    await this.registry.connect(this.sponsor).sponsor(fundId, { value: 100 });
+    await this.registry.connect(this.owner).sponsor(fundId, { value: 5 });
+    await this.registry.connect(this.node).deductFees(fundId, 20);
+
+    // chooseFundGasLimit
+    expect(
+      await ethers.provider.getStorage(
+        this.registry,
+        '0x0000000000000000000000000000000000000000000000000000000000000001',
+      ),
+    ).to.equal('0x0000000000000000000000000000000000000000000000000000000000045b24');
+
+    // deductFeesGasLimit
+    expect(
+      await ethers.provider.getStorage(
+        this.registry,
+        '0x0000000000000000000000000000000000000000000000000000000000000002',
+      ),
+    ).to.equal('0x00000000000000000000000000000000000000000000000000000000000c0b00');
+
+    // sponsorships[fundId].available
+    // 100 (sponsor) + 5 (owner) - 20 (deductFees) = 85
+    expect(
+      await ethers.provider.getStorage(
+        this.registry,
+        '0xc9c9d38ffc86e54587ebbb0f50fbfaeda01172f2ed3d3093531d3abcc205314b',
+      ),
+    ).to.equal('0x0000000000000000000000000000000000000000000000000000000000000055'); // 85
+
+    // sponsorships[fundId].totalContributions
+    // 100 (sponsor) + 5 (owner) = 105
+    expect(
+      await ethers.provider.getStorage(
+        this.registry,
+        '0xc9c9d38ffc86e54587ebbb0f50fbfaeda01172f2ed3d3093531d3abcc205314c',
+      ),
+    ).to.equal('0x0000000000000000000000000000000000000000000000000000000000000069'); // 105
+
+    // sponsorships[fundId].contributors[sponsor]
+    expect(
+      await ethers.provider.getStorage(
+        this.registry,
+        '0xb9fc4c92bf87aa6eea0ca28b75c46112578502a1be8e5f6953c874b662f70f63',
+      ),
+    ).to.equal('0x0000000000000000000000000000000000000000000000000000000000000064'); // 100
+
+    // sponsorships[fundId].contributors[owner]
+    expect(
+      await ethers.provider.getStorage(
+        this.registry,
+        '0x57a558bedd5b3f6e3c80604b7fc322e572f7273949f878b504489dea3e3cb1c3',
+      ),
+    ).to.equal('0x0000000000000000000000000000000000000000000000000000000000000005'); // 5
   });
 });

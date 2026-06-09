@@ -1,8 +1,10 @@
 {
   "extends": "solhint:recommended",
   "rules": {
-    "func-visibility": ["warn", {"ignoreConstructors": true}],
+    "func-visibility": ["warn", { "ignoreConstructors": true }],
     "max-states-count": ["off"],
-    "no-inline-assembly": "off"
+    "use-natspec": "off",
+    "gas-indexed-events": "off",
+    "gas-strict-inequalities": "off"
   }
 }

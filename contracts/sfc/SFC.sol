@@ -342,7 +342,7 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
     function sealEpochValidators(uint256[] calldata nextValidatorIDs) external onlyDriver {
         EpochSnapshot storage snapshot = getEpochSnapshot[currentEpoch()];
         // fill data for the next snapshot
-        for (uint256 i = 0; i < nextValidatorIDs.length; i++) {
+        for (uint256 i = 0; i < nextValidatorIDs.length; ++i) {
             uint256 validatorID = nextValidatorIDs[i];
             uint256 receivedStake = getValidator[validatorID].receivedStake;
             snapshot.receivedStake[validatorID] = receivedStake;
@@ -856,7 +856,7 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
         // distribute the individual shares
         EpochSnapshot storage epochRewarded = getEpochSnapshot[epoch];
         uint256 amountDistributed = 0;
-        for (uint256 i = 0; i < epochRewarded.validatorIDs.length; i++) {
+        for (uint256 i = 0; i < epochRewarded.validatorIDs.length; ++i) {
             uint256 validatorID = epochRewarded.validatorIDs[i];
             uint256 share = (amountToDistribute * epochRewarded.receivedStake[validatorID]) / epochRewarded.totalStake;
             if (share > 0) {
@@ -905,7 +905,7 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
         uint256[] memory offlineBlocks
     ) internal {
         // mark offline nodes
-        for (uint256 i = 0; i < validatorIDs.length; i++) {
+        for (uint256 i = 0; i < validatorIDs.length; ++i) {
             if (
                 offlineBlocks[i] > c.offlinePenaltyThresholdBlocksNum() &&
                 offlineTime[i] >= c.offlinePenaltyThresholdTime()
@@ -920,6 +920,7 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
     }
 
     /// Seal epoch - calculate rewards.
+    // solhint-disable-next-line function-max-lines
     function _sealEpochRewards(
         uint256 epochDuration,
         EpochSnapshot storage snapshot,
@@ -936,7 +937,7 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
             0
         );
 
-        for (uint256 i = 0; i < validatorIDs.length; i++) {
+        for (uint256 i = 0; i < validatorIDs.length; ++i) {
             uint256 prevAccumulatedTxsFee = prevSnapshot.accumulatedOriginatedTxsFee[validatorIDs[i]];
             uint256 originatedTxsFee = 0;
             if (accumulatedOriginatedTxsFee[i] > prevAccumulatedTxsFee) {
@@ -950,7 +951,7 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
             ctx.epochFee = ctx.epochFee + originatedTxsFee;
         }
 
-        for (uint256 i = 0; i < validatorIDs.length; i++) {
+        for (uint256 i = 0; i < validatorIDs.length; ++i) {
             // baseRewardWeight = {stake} * {uptime ^ 2}
             ctx.baseRewardWeights[i] =
                 (((snapshot.receivedStake[validatorIDs[i]] * uptimes[i]) / epochDuration) * uptimes[i]) /
@@ -958,7 +959,7 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
             ctx.totalBaseRewardWeight = ctx.totalBaseRewardWeight + ctx.baseRewardWeights[i];
         }
 
-        for (uint256 i = 0; i < validatorIDs.length; i++) {
+        for (uint256 i = 0; i < validatorIDs.length; ++i) {
             uint256 rawReward = _calcRawValidatorEpochBaseReward(
                 epochDuration,
                 c.baseRewardPerSecond(),
@@ -1024,7 +1025,7 @@ contract SFC is OwnableUpgradeable, UUPSUpgradeable, Version {
         uint256[] memory validatorIDs,
         uint256[] memory uptimes
     ) internal {
-        for (uint256 i = 0; i < validatorIDs.length; i++) {
+        for (uint256 i = 0; i < validatorIDs.length; ++i) {
             uint256 validatorID = validatorIDs[i];
             // compute normalised uptime as a percentage in the fixed-point format
             uint256 normalisedUptime = (uptimes[i] * Decimal.unit()) / epochDuration;

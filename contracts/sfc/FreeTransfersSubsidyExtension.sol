@@ -19,7 +19,7 @@ contract FreeTransfersSubsidyExtension is ISubsidiesExtension, OwnableUpgradeabl
         // uint40 + uint96 + uint96 = 29 bytes, fits in 1 slot
         uint40 lastTimestamp; // the last update of count
         uint96 count; // current level of the bucket (at lastTimestamp)
-        uint96 limit; // maximum bucket level, refilled at a rate of limit per day
+        uint96 dailyLimit; // maximum bucket level, refilled at a rate of limit per day
     }
 
     struct Project {
@@ -39,9 +39,9 @@ contract FreeTransfersSubsidyExtension is ISubsidiesExtension, OwnableUpgradeabl
     /// @notice Maps an ERC-20 token address to the project that sponsors its transfers.
     mapping(address token => uint32 projectId) public tokenToProject;
 
-    event ProjectRegistered(uint32 indexed projectId, address indexed owner, uint96 freeTransfersLimit);
+    event ProjectRegistered(uint32 indexed projectId, address indexed owner, uint96 freeTransfersDailyLimit);
     event ProjectOwnerChanged(uint32 indexed projectId, address indexed newOwner);
-    event FreeTransfersLimitChanged(uint32 indexed projectId, uint96 newLimit);
+    event FreeTransfersDailyLimitChanged(uint32 indexed projectId, uint96 newDailyLimit);
     event TokenAdded(uint32 indexed projectId, address indexed token, address indexed by);
     event TokenRemoved(uint32 indexed projectId, address indexed token, address indexed by);
 
@@ -70,16 +70,16 @@ contract FreeTransfersSubsidyExtension is ISubsidiesExtension, OwnableUpgradeabl
     /// @notice Register a new project with an initial daily free transfer limit.
     /// @param projectId Unique 32-bit identifier for the project. Must be non-zero.
     /// @param projectOwner Address that will manage the project's token list.
-    /// @param freeTransfersLimit Maximum free ERC-20 transfers per day for this project.
-    function registerProject(uint32 projectId, address projectOwner, uint96 freeTransfersLimit) external onlyOwner {
+    /// @param dailyLimit Maximum free ERC-20 transfers per day for this project.
+    function registerProject(uint32 projectId, address projectOwner, uint96 dailyLimit) external onlyOwner {
         require(projectId != 0, InvalidProjectId());
         require(projectOwner != address(0), InvalidOwnerAddress());
         require(projects[projectId].owner == address(0), ProjectAlreadyExists());
         projects[projectId].owner = projectOwner;
-        projects[projectId].bucket.limit = freeTransfersLimit;
-        projects[projectId].bucket.count = freeTransfersLimit;
+        projects[projectId].bucket.dailyLimit = dailyLimit;
+        projects[projectId].bucket.count = dailyLimit;
         projects[projectId].bucket.lastTimestamp = uint40(block.timestamp);
-        emit ProjectRegistered(projectId, projectOwner, freeTransfersLimit);
+        emit ProjectRegistered(projectId, projectOwner, dailyLimit);
     }
 
     /// @notice Transfer ownership of a project to a new address.
@@ -91,12 +91,12 @@ contract FreeTransfersSubsidyExtension is ISubsidiesExtension, OwnableUpgradeabl
     }
 
     /// @notice Update the daily free transfer limit for a project. Set to 0 to effectively pause it.
-    function setFreeTransfersLimit(uint32 projectId, uint96 newLimit) external onlyOwner {
+    function setFreeTransfersDailyLimit(uint32 projectId, uint96 dailyLimit) external onlyOwner {
         require(projects[projectId].owner != address(0), ProjectNotFound());
-        projects[projectId].bucket.limit = newLimit;
-        projects[projectId].bucket.count = newLimit;
+        projects[projectId].bucket.dailyLimit = dailyLimit;
+        projects[projectId].bucket.count = dailyLimit;
         projects[projectId].bucket.lastTimestamp = uint40(block.timestamp);
-        emit FreeTransfersLimitChanged(projectId, newLimit);
+        emit FreeTransfersDailyLimitChanged(projectId, dailyLimit);
     }
 
     /// @notice Add an ERC-20 token to the project's sponsored token list.
@@ -125,11 +125,13 @@ contract FreeTransfersSubsidyExtension is ISubsidiesExtension, OwnableUpgradeabl
     }
 
     function _freeTransfersRemaining(LeakyBucket storage bucket) private view returns (uint96) {
-        uint96 limit = bucket.limit;
+        uint96 limit = bucket.dailyLimit;
         uint256 refilled = ((block.timestamp - bucket.lastTimestamp) * uint256(limit)) / 1 days;
-        if (refilled >= uint256(limit)) return limit; // avoid overflow
-        uint128 level = uint128(bucket.count) + uint128(refilled);
-        uint128 cap = uint128(limit);
+        if (refilled >= uint256(limit)) return limit;
+        // refilled < limit -> fits into uint96
+        uint104 level = uint104(bucket.count) + uint104(refilled);
+        uint104 cap = uint104(limit);
+        // cap fits into uint96 -> minimum of level and cap fits into uint96
         return uint96(level > cap ? cap : level);
     }
 

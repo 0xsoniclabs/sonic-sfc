@@ -159,12 +159,12 @@ describe('FreeTransfersSubsidyExtension', () => {
 
   it('Changing limit resets bucket to full', async function () {
     const newLimit = 20;
-    await this.extension.connect(this.owner).setFreeTransfersLimit(this.projectId, newLimit);
+    await this.extension.connect(this.owner).setFreeTransfersDailyLimit(this.projectId, newLimit);
     expect(await this.extension.freeTransfersRemaining(this.projectId)).to.equal(newLimit);
   });
 
   it('Setting limit to 0 stops sponsorship', async function () {
-    await this.extension.connect(this.owner).setFreeTransfersLimit(this.projectId, 0);
+    await this.extension.connect(this.owner).setFreeTransfersDailyLimit(this.projectId, 0);
 
     const from = ethers.Wallet.createRandom();
     const to = ethers.Wallet.createRandom();

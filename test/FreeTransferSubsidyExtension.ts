@@ -242,6 +242,66 @@ describe('FreeTransfersSubsidyExtension', () => {
     });
   });
 
+  describe('Leaky bucket boundary conditions', () => {
+    async function exhaustBucket(ctx: Mocha.Context) {
+      const calldata = ctx.makeTransferCalldata(ethers.Wallet.createRandom().address);
+      const [, trackingId] = await ctx.registry
+          .connect(ctx.node)
+          .chooseFund(ethers.Wallet.createRandom().address, ctx.erc20, 0, 1, calldata, 100);
+      for (let i = 0; i < ctx.dailyLimit; i++) {
+        await ctx.registry.connect(ctx.node).track(trackingId, 100);
+      }
+    }
+
+    it('freeTransfersRemaining is capped at dailyLimit after multi-day wait', async function () {
+      await exhaustBucket(this);
+
+      await time.increase(2 * 24 * 60 * 60); // 2 full days
+      expect(await this.extension.freeTransfersRemaining(this.projectId)).to.equal(this.dailyLimit);
+    });
+
+    // At max uint96 limit, after ~256 days refilled exceeds uint104 max — without the guard on
+    // line 130 of the contract, uint104(refilled) would silently truncate to a wrong value.
+    it('max uint96 limit after 400 days returns exact limit (no uint104 silent truncation)', async function () {
+      const maxUint96 = 2n ** 96n - 1n;
+      await this.extension.connect(this.owner).registerProject(2, this.stranger.address, maxUint96);
+
+      await time.increase(400 * 24 * 60 * 60);
+      expect(await this.extension.freeTransfersRemaining(2)).to.equal(maxUint96);
+    });
+
+    it('max uint96 dailyLimit: initial freeTransfersRemaining equals limit', async function () {
+      const maxUint96 = 2n ** 96n - 1n;
+      await this.extension.connect(this.owner).registerProject(2, this.stranger.address, maxUint96);
+      expect(await this.extension.freeTransfersRemaining(2)).to.equal(maxUint96);
+    });
+
+    // Verifies the underflow guard in track() — calling track when remaining == 0 must be a no-op.
+    it('track() is a no-op when bucket is empty', async function () {
+      await exhaustBucket(this);
+      expect(await this.extension.freeTransfersRemaining(this.projectId)).to.equal(0);
+
+      const trackingId = ethers.zeroPadValue(
+        ethers.toBeHex((0xf7n << 248n) | BigInt(this.projectId)),
+        32,
+      );
+      await expect(this.registry.connect(this.node).track(trackingId, 0)).not.to.be.reverted;
+      expect(await this.extension.freeTransfersRemaining(this.projectId)).to.equal(0);
+    });
+
+    it('reducing dailyLimit resets bucket to the new lower limit', async function () {
+      const calldata = this.makeTransferCalldata(ethers.Wallet.createRandom().address);
+      const [, trackingId] = await this.registry
+        .connect(this.node)
+        .chooseFund(ethers.Wallet.createRandom().address, this.erc20, 0, 1, calldata, 100);
+      await this.registry.connect(this.node).track(trackingId, 100);
+
+      const lowerLimit = 3;
+      await this.extension.connect(this.owner).setFreeTransfersDailyLimit(this.projectId, lowerLimit);
+      expect(await this.extension.freeTransfersRemaining(this.projectId)).to.equal(lowerLimit);
+    });
+  });
+
   describe('Removing tokens', () => {
     it('Project owner can remove a token', async function () {
       await expect(this.extension.connect(this.projectOwner).removeToken(this.projectId, await this.erc20.getAddress()))

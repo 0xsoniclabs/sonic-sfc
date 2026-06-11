@@ -11,8 +11,9 @@ import {Version} from "../version/Version.sol";
 
 /**
  * @title Token Transfer Subsidies
- * @notice Subsidies extension sponsoring ERC-20 transfers of registered tokens.
- *         The amount of sponsored transactions is rate-limited per token via a leaky bucket.
+ * @notice Subsidies extension sponsoring ERC-20 transfers of registered tokens and native pure
+ *         transfers. The amount of sponsored transactions is rate-limited per token via a leaky
+ *         bucket. Register the NATIVE_TOKEN sentinel to enable sponsoring of native pure transfers.
  * @custom:security-contact security@fantom.foundation
  */
 contract TokenTransferSubsidies is ISubsidiesExtension, AccessControlUpgradeable, UUPSUpgradeable, Version {
@@ -26,6 +27,9 @@ contract TokenTransferSubsidies is ISubsidiesExtension, AccessControlUpgradeable
     /// @notice Role allowed to register/remove tokens and set their daily limits.
     bytes32 public constant TOKEN_MANAGER_ROLE = keccak256("TOKEN_MANAGER_ROLE");
 
+    /// @notice Sentinel representing the native token. Register it to enable sponsoring of native pure transfers.
+    address public constant NATIVE_TOKEN = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+
     // only the SubsidiesRegistry contract is allowed to call track()
     address private constant SUBSIDIES_REGISTRY = 0x7d0E23398b6CA0eC7Cdb5b5Aad7F1b11215012d2;
 
@@ -36,7 +40,7 @@ contract TokenTransferSubsidies is ISubsidiesExtension, AccessControlUpgradeable
     mapping(address token => LeakyBucket) private tokenToBucket;
 
     event TokenRegistered(address indexed token, uint96 dailyLimit);
-    event FreeTransfersDailyLimitChanged(address indexed token, uint96 newDailyLimit);
+    event DailyLimitChanged(address indexed token, uint96 newDailyLimit);
     event TokenRemoved(address indexed token);
 
     error TokenAlreadyRegistered();
@@ -80,14 +84,14 @@ contract TokenTransferSubsidies is ISubsidiesExtension, AccessControlUpgradeable
     }
 
     /// @notice Update the daily free transfer limit for a token. Set to 0 to effectively pause it.
-    function setFreeTransfersDailyLimit(address token, uint96 dailyLimit) external onlyRole(TOKEN_MANAGER_ROLE) {
+    function setDailyLimit(address token, uint96 dailyLimit) external onlyRole(TOKEN_MANAGER_ROLE) {
         require(tokenToBucket[token].lastTimestamp != 0, TokenNotRegistered());
         tokenToBucket[token] = LeakyBucket({
             lastTimestamp: uint40(block.timestamp),
             count: dailyLimit,
             dailyLimit: dailyLimit
         });
-        emit FreeTransfersDailyLimitChanged(token, dailyLimit);
+        emit DailyLimitChanged(token, dailyLimit);
     }
 
     /// @notice Returns the number of free ERC-20 transfers currently available for a token.
@@ -118,22 +122,27 @@ contract TokenTransferSubsidies is ISubsidiesExtension, AccessControlUpgradeable
     function chooseFund(
         address /*from*/,
         address to,
-        uint256 /*value*/,
+        uint256 value,
         uint256 /*nonce*/,
         bytes calldata callData,
         uint256 /*fee*/
     ) external view returns (uint256 mode, bytes32 payload) {
+        address token;
         if (callData.length == 68 && bytes4(callData[:4]) == IERC20.transfer.selector) {
-            LeakyBucket storage bucket = tokenToBucket[to];
-            if (bucket.lastTimestamp == 0) return (SUBSIDY_MODE_NONE, bytes32(0));
-            // the refill needs to be computed only for an empty bucket
-            if (bucket.count == 0 && _freeTransfersRemaining(bucket) == 0) {
-                return (SUBSIDY_MODE_NONE, bytes32(0)); // rate limit reached
-            }
-            return (SUBSIDY_MODE_TRACKED, TRACKING_ID_PREFIX | bytes32(uint256(uint160(to))));
+            token = to;
+        } else if (callData.length == 0 && value > 0) {
+            token = NATIVE_TOKEN;
+        } else {
+            return (SUBSIDY_MODE_NONE, bytes32(0));
         }
 
-        return (SUBSIDY_MODE_NONE, bytes32(0));
+        LeakyBucket storage bucket = tokenToBucket[token];
+        if (bucket.lastTimestamp == 0) return (SUBSIDY_MODE_NONE, bytes32(0));
+        // the refill needs to be computed only for an empty bucket
+        if (bucket.count == 0 && _freeTransfersRemaining(bucket) == 0) {
+            return (SUBSIDY_MODE_NONE, bytes32(0)); // rate limit reached
+        }
+        return (SUBSIDY_MODE_TRACKED, TRACKING_ID_PREFIX | bytes32(uint256(uint160(token))));
     }
 
     /// @notice Consume one free transfer from the token's bucket after a sponsored transaction.

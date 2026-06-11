@@ -107,7 +107,7 @@ contract SenderProjectSubsidies is ISubsidiesExtension, AccessControlUpgradeable
     }
 
     /// @notice Update the daily free transfer limit for a project. Set to 0 to effectively pause it.
-    function setFreeTransfersDailyLimit(uint32 projectId, uint96 dailyLimit) external onlyRole(PROJECT_MANAGER_ROLE) {
+    function setDailyLimit(uint32 projectId, uint96 dailyLimit) external onlyRole(PROJECT_MANAGER_ROLE) {
         require(projectBuckets[projectId].lastTimestamp != 0, ProjectNotFound());
         projectBuckets[projectId] = LeakyBucket({
             lastTimestamp: uint40(block.timestamp),
@@ -194,9 +194,9 @@ contract SenderProjectSubsidies is ISubsidiesExtension, AccessControlUpgradeable
         bytes calldata callData,
         uint256 /*fee*/
     ) external view returns (uint256 mode, bytes32 payload) {
-        bool isWhitelistedTransfer = (callData.length == 68 &&
-            bytes4(callData[:4]) == IERC20.transfer.selector &&
-            whitelistedTokens[to]) || (value > 0 && callData.length == 0 && whitelistedTokens[NATIVE_TOKEN]);
+        bool isWhitelistedTransfer =
+            (callData.length == 68 && bytes4(callData[:4]) == IERC20.transfer.selector && whitelistedTokens[to]) ||
+            (callData.length == 0 && value > 0 && whitelistedTokens[NATIVE_TOKEN]);
         if (isWhitelistedTransfer) {
             return _trySponsor(senderToProject[from]);
         }

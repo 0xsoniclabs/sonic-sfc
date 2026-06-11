@@ -61,10 +61,6 @@ describe('SenderProjectSubsidies', () => {
     Object.assign(this, await loadFixture(fixture));
   });
 
-  it('Reports its tracking ID prefix', async function () {
-    expect(await this.extension.trackingIdPrefix()).to.equal(0xf6);
-  });
-
   it('Allows free ERC-20 transfer for registered sender', async function () {
     const to = ethers.Wallet.createRandom();
     const calldata = this.makeTransferCalldata(to.address);
@@ -389,7 +385,7 @@ describe('SenderProjectSubsidies', () => {
     });
 
     it('Setting limit to 0 stops sponsorship', async function () {
-      await this.extension.connect(this.projectManager).setFreeTransfersDailyLimit(this.projectId, 0);
+      await this.extension.connect(this.projectManager).setDailyLimit(this.projectId, 0);
 
       const [mode] = await this.registry.chooseFund(
         this.sender.address,

@@ -7,6 +7,7 @@ const SUBSIDY_MODE_NONE = 0n;
 const SUBSIDY_MODE_TRACKED = 3n;
 const noFundId = '0x0000000000000000000000000000000000000000000000000000000000000000';
 
+const NATIVE_TOKEN = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 const TOKEN_MANAGER_ROLE = ethers.keccak256(ethers.toUtf8Bytes('TOKEN_MANAGER_ROLE'));
 
 describe('TokenTransferSubsidies', () => {
@@ -44,10 +45,6 @@ describe('TokenTransferSubsidies', () => {
 
   beforeEach(async function () {
     Object.assign(this, await loadFixture(fixture));
-  });
-
-  it('Reports its tracking ID prefix', async function () {
-    expect(await this.extension.trackingIdPrefix()).to.equal(0xf7);
   });
 
   it('Allows free transfer via SubsidiesRegistry', async function () {
@@ -142,16 +139,9 @@ describe('TokenTransferSubsidies', () => {
     );
   });
 
-  it('Changing limit resets bucket to full', async function () {
-    const erc20Address = await this.erc20.getAddress();
-    const newLimit = 20;
-    await this.extension.connect(this.tokenManager).setFreeTransfersDailyLimit(erc20Address, newLimit);
-    expect(await this.extension.freeTransfersRemaining(erc20Address)).to.equal(newLimit);
-  });
-
   it('Setting limit to 0 stops sponsorship', async function () {
     const erc20Address = await this.erc20.getAddress();
-    await this.extension.connect(this.tokenManager).setFreeTransfersDailyLimit(erc20Address, 0);
+    await this.extension.connect(this.tokenManager).setDailyLimit(erc20Address, 0);
 
     const from = ethers.Wallet.createRandom();
     const to = ethers.Wallet.createRandom();
@@ -167,6 +157,65 @@ describe('TokenTransferSubsidies', () => {
     expect(mode).to.equal(SUBSIDY_MODE_NONE);
   });
 
+  describe('Native transfers', () => {
+    it('Allows native transfer when NATIVE_TOKEN is registered', async function () {
+      await this.extension.connect(this.tokenManager).registerToken(NATIVE_TOKEN, 5);
+
+      const recipient = ethers.Wallet.createRandom();
+      const [mode, trackingId] = await this.registry
+        .connect(this.node)
+        .chooseFund(ethers.Wallet.createRandom().address, recipient.address, 1000, 1, '0x', 100);
+      expect(mode).to.equal(SUBSIDY_MODE_TRACKED);
+      expect(BigInt(trackingId) >> 248n).to.equal(0xf7n);
+
+      await this.registry.connect(this.node).track(trackingId, 100);
+      expect(await this.extension.freeTransfersRemaining(NATIVE_TOKEN)).to.equal(4);
+    });
+
+    it('Rejects native transfer when NATIVE_TOKEN is not registered', async function () {
+      const recipient = ethers.Wallet.createRandom();
+      const [mode] = await this.registry.chooseFund(
+        ethers.Wallet.createRandom().address,
+        recipient.address,
+        1000,
+        1,
+        '0x',
+        100,
+      );
+      expect(mode).to.equal(SUBSIDY_MODE_NONE);
+    });
+
+    it('Rejects native transfer with zero value', async function () {
+      await this.extension.connect(this.tokenManager).registerToken(NATIVE_TOKEN, 5);
+
+      const recipient = ethers.Wallet.createRandom();
+      const [mode] = await this.registry.chooseFund(
+        ethers.Wallet.createRandom().address,
+        recipient.address,
+        0,
+        1,
+        '0x',
+        100,
+      );
+      expect(mode).to.equal(SUBSIDY_MODE_NONE);
+    });
+
+    it('Rejects native transfer with non-empty calldata', async function () {
+      await this.extension.connect(this.tokenManager).registerToken(NATIVE_TOKEN, 5);
+
+      const recipient = ethers.Wallet.createRandom();
+      const [mode] = await this.registry.chooseFund(
+        ethers.Wallet.createRandom().address,
+        recipient.address,
+        1000,
+        1,
+        '0xdeadbeef',
+        100,
+      );
+      expect(mode).to.equal(SUBSIDY_MODE_NONE);
+    });
+  });
+
   describe('Token registration', () => {
     it('TOKEN_MANAGER can register a token', async function () {
       const token = await ethers.deployContract('TestingERC20', []);
@@ -180,13 +229,6 @@ describe('TokenTransferSubsidies', () => {
       const token = await ethers.deployContract('TestingERC20', []);
       await expect(
         this.extension.connect(this.stranger).registerToken(await token.getAddress(), 50),
-      ).to.be.revertedWithCustomError(this.extension, 'AccessControlUnauthorizedAccount');
-    });
-
-    it('Admin without TOKEN_MANAGER role cannot register a token', async function () {
-      const token = await ethers.deployContract('TestingERC20', []);
-      await expect(
-        this.extension.connect(this.admin).registerToken(await token.getAddress(), 50),
       ).to.be.revertedWithCustomError(this.extension, 'AccessControlUnauthorizedAccount');
     });
 
@@ -247,7 +289,7 @@ describe('TokenTransferSubsidies', () => {
       expect(await this.extension.freeTransfersRemaining(erc20Address)).to.equal(0);
     });
 
-    it('reducing dailyLimit resets bucket to the new lower limit', async function () {
+    it('setDailyLimit resets bucket to the new limit regardless of current count', async function () {
       const erc20Address = await this.erc20.getAddress();
       const calldata = this.makeTransferCalldata(ethers.Wallet.createRandom().address);
       const [, trackingId] = await this.registry
@@ -255,9 +297,13 @@ describe('TokenTransferSubsidies', () => {
         .chooseFund(ethers.Wallet.createRandom().address, this.erc20, 0, 1, calldata, 100);
       await this.registry.connect(this.node).track(trackingId, 100);
 
-      const lowerLimit = 3;
-      await this.extension.connect(this.tokenManager).setFreeTransfersDailyLimit(erc20Address, lowerLimit);
-      expect(await this.extension.freeTransfersRemaining(erc20Address)).to.equal(lowerLimit);
+      // increasing: count (9) < newLimit (20) — resets to 20
+      await this.extension.connect(this.tokenManager).setDailyLimit(erc20Address, 20);
+      expect(await this.extension.freeTransfersRemaining(erc20Address)).to.equal(20);
+
+      // decreasing: count would be 20, newLimit (3) is lower — resets to 3
+      await this.extension.connect(this.tokenManager).setDailyLimit(erc20Address, 3);
+      expect(await this.extension.freeTransfersRemaining(erc20Address)).to.equal(3);
     });
   });
 

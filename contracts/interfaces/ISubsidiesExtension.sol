@@ -7,6 +7,11 @@ pragma solidity 0.8.27;
  * @custom:security-contact security@fantom.foundation
  */
 interface ISubsidiesExtension {
+    /// @notice The top-byte prefix this extension embeds into its tracking IDs.
+    /// @dev The SubsidiesRegistry uses it to route track() calls to the issuing extension.
+    ///      Must be unique among extensions registered in the SubsidiesRegistry.
+    function trackingIdPrefix() external view returns (uint8);
+
     /// @notice Check if a transaction is covered by Gas Subsidies and return the fund to sponsor it.
     /// @param from Transaction sender
     /// @param to Transaction recipient (typically the called contract, zero for contract creation calls)
@@ -24,13 +29,6 @@ interface ISubsidiesExtension {
         bytes calldata callData,
         uint256 fee
     ) external view returns (uint256 mode, bytes32 payload);
-
-    /// @notice Deduct transaction fees from a sponsorship fund.
-    /// @dev This function is intended to be called only by the Sonic node.
-    ///      Deducts the fee from the fund balance and burns the native tokens through SFC.
-    /// @param fundId The unique identifier of the sponsorship fund.
-    /// @param fee The fee amount to deduct (in wei).
-    function deductFees(bytes32 fundId, uint256 fee) external;
 
     /// @notice Report the gas fee consumed by a network-sponsored tracked transaction.
     /// @dev This function is intended to be called only by the Sonic node - from the zero address.

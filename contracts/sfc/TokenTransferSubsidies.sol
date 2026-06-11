@@ -4,23 +4,27 @@ pragma solidity 0.8.27;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISubsidiesExtension} from "../interfaces/ISubsidiesExtension.sol";
 import {SUBSIDY_MODE_NONE, SUBSIDY_MODE_TRACKED} from "../interfaces/ISubsidiesRegistry.sol";
+import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Version} from "../version/Version.sol";
 
 /**
- * @title Free Transfers Subsidy Extension
- * @notice Registry allowing to sponsor ERC-20 transfers on registered tokens.
+ * @title Token Transfer Subsidies
+ * @notice Subsidies extension sponsoring ERC-20 transfers of registered tokens.
  *         The amount of sponsored transactions is rate-limited per token via a leaky bucket.
  * @custom:security-contact security@fantom.foundation
  */
-contract FreeTransfersSubsidyExtension is ISubsidiesExtension, OwnableUpgradeable, UUPSUpgradeable, Version {
+contract TokenTransferSubsidies is ISubsidiesExtension, AccessControlUpgradeable, UUPSUpgradeable, Version {
     struct LeakyBucket {
         // uint40 + uint96 + uint96 = 29 bytes, fits in 1 slot
         uint40 lastTimestamp; // the last update of count
         uint96 count; // current level of the bucket (at lastTimestamp)
         uint96 dailyLimit; // maximum bucket level, refilled at a rate of limit per day
     }
+
+    /// @notice Role allowed to register/remove tokens and set their daily limits.
+    bytes32 public constant TOKEN_MANAGER_ROLE = keccak256("TOKEN_MANAGER_ROLE");
 
     // only the SubsidiesRegistry contract is allowed to call track()
     address private constant SUBSIDIES_REGISTRY = 0x7d0E23398b6CA0eC7Cdb5b5Aad7F1b11215012d2;
@@ -37,8 +41,7 @@ contract FreeTransfersSubsidyExtension is ISubsidiesExtension, OwnableUpgradeabl
 
     error TokenAlreadyRegistered();
     error TokenNotRegistered();
-    error NotSupported();
-    error NotNode();
+    error NotSubsidiesRegistry();
     error InvalidTrackingId();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -46,14 +49,20 @@ contract FreeTransfersSubsidyExtension is ISubsidiesExtension, OwnableUpgradeabl
         _disableInitializers();
     }
 
-    /// @notice Initialize the contract. The owner is copied from the SubsidiesRegistry contract.
+    /// @notice Initialize the contract. DEFAULT_ADMIN_ROLE is granted to the SubsidiesRegistry owner.
     function initialize() external initializer {
-        __Ownable_init(OwnableUpgradeable(SUBSIDIES_REGISTRY).owner());
+        __AccessControl_init();
         __UUPSUpgradeable_init();
+        _grantRole(DEFAULT_ADMIN_ROLE, OwnableUpgradeable(SUBSIDIES_REGISTRY).owner());
+    }
+
+    /// @notice The top-byte prefix of tracking IDs issued by this extension.
+    function trackingIdPrefix() external pure returns (uint8) {
+        return uint8(uint256(TRACKING_ID_PREFIX) >> 248);
     }
 
     /// @notice Register an ERC-20 token and set its daily free transfer limit.
-    function registerToken(address token, uint96 dailyLimit) external onlyOwner {
+    function registerToken(address token, uint96 dailyLimit) external onlyRole(TOKEN_MANAGER_ROLE) {
         require(tokenToBucket[token].lastTimestamp == 0, TokenAlreadyRegistered());
         tokenToBucket[token] = LeakyBucket({
             lastTimestamp: uint40(block.timestamp),
@@ -64,18 +73,20 @@ contract FreeTransfersSubsidyExtension is ISubsidiesExtension, OwnableUpgradeabl
     }
 
     /// @notice Remove an ERC-20 token from the sponsored token list.
-    function removeToken(address token) external onlyOwner {
+    function removeToken(address token) external onlyRole(TOKEN_MANAGER_ROLE) {
         require(tokenToBucket[token].lastTimestamp != 0, TokenNotRegistered());
         delete tokenToBucket[token];
         emit TokenRemoved(token);
     }
 
     /// @notice Update the daily free transfer limit for a token. Set to 0 to effectively pause it.
-    function setFreeTransfersDailyLimit(address token, uint96 dailyLimit) external onlyOwner {
+    function setFreeTransfersDailyLimit(address token, uint96 dailyLimit) external onlyRole(TOKEN_MANAGER_ROLE) {
         require(tokenToBucket[token].lastTimestamp != 0, TokenNotRegistered());
-        tokenToBucket[token].dailyLimit = dailyLimit;
-        tokenToBucket[token].count = dailyLimit;
-        tokenToBucket[token].lastTimestamp = uint40(block.timestamp);
+        tokenToBucket[token] = LeakyBucket({
+            lastTimestamp: uint40(block.timestamp),
+            count: dailyLimit,
+            dailyLimit: dailyLimit
+        });
         emit FreeTransfersDailyLimitChanged(token, dailyLimit);
     }
 
@@ -128,21 +139,19 @@ contract FreeTransfersSubsidyExtension is ISubsidiesExtension, OwnableUpgradeabl
     /// @dev Intended to be called only by SubsidiesRegistry, which forwards the call from the Sonic node.
     /// @param trackingId Tracking ID returned by chooseFund, encoding the 0xF7 prefix and token address.
     function track(bytes32 trackingId, uint256 /*fee*/) external {
-        require(msg.sender == SUBSIDIES_REGISTRY, NotNode());
+        require(msg.sender == SUBSIDIES_REGISTRY, NotSubsidiesRegistry());
         require(trackingId & bytes32(uint256(0xFF) << 248) == TRACKING_ID_PREFIX, InvalidTrackingId());
         address token = address(uint160(uint256(trackingId)));
         LeakyBucket storage bucket = tokenToBucket[token];
         uint96 remaining = _freeTransfersRemaining(bucket);
         if (remaining == 0) return; // avoid underflow
-        bucket.count = uint96(remaining - 1);
-        bucket.lastTimestamp = uint40(block.timestamp);
-    }
-
-    /// @notice Not supported. This registry uses only tracked sponsorship, not fund-based sponsorship.
-    function deductFees(bytes32 /*fundId*/, uint256 /*fee*/) external pure {
-        revert NotSupported();
+        tokenToBucket[token] = LeakyBucket({
+            lastTimestamp: uint40(block.timestamp),
+            count: remaining - 1,
+            dailyLimit: bucket.dailyLimit
+        });
     }
 
     // solhint-disable-next-line no-empty-blocks
-    function _authorizeUpgrade(address) internal override onlyOwner {}
+    function _authorizeUpgrade(address) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
 }

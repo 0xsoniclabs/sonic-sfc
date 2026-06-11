@@ -6,7 +6,7 @@ import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/Pau
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISFC} from "../interfaces/ISFC.sol";
-import {ISubsidiesRegistry, SUBSIDY_MODE_NONE, SUBSIDY_MODE_FUND, SUBSIDY_MODE_TRACKED} from "../interfaces/ISubsidiesRegistry.sol";
+import {ISubsidiesRegistry, SUBSIDY_MODE_NONE, SUBSIDY_MODE_FUND} from "../interfaces/ISubsidiesRegistry.sol";
 import {ISubsidiesExtension} from "../interfaces/ISubsidiesExtension.sol";
 import {Version} from "../version/Version.sol";
 
@@ -35,12 +35,18 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
     /// @notice GasLimit to be used for deductFees() transactions.
     uint256 public deductFeesGasLimit;
 
-    /// @notice Optional delegate called when this contract cannot sponsor a transaction.
-    address public delegate;
+    /// @notice Extensions probed by chooseFund when this contract cannot sponsor a transaction.
+    ///         Probed in array order; the first extension returning a non-NONE mode wins.
+    ISubsidiesExtension[] public extensions;
+
+    /// @notice Maps a tracking ID top-byte prefix to the extension issuing such tracking IDs.
+    ///         Used to route track() calls to the issuing extension.
+    mapping(uint8 prefix => ISubsidiesExtension extension) public extensionByPrefix;
 
     event Sponsored(bytes32 indexed fundId, address indexed sponsor, uint256 amount);
     event Withdrawn(bytes32 indexed fundId, address indexed sponsor, uint256 amount);
-    event DelegateChanged(address indexed newDelegate);
+    event ExtensionAdded(address indexed extension, uint8 prefix);
+    event ExtensionRemoved(address indexed extension, uint8 prefix);
 
     error NotNode();
     error NotSponsored();
@@ -50,6 +56,8 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
     error ZeroFundId();
     error NoFundsAttached();
     error NotInitialized();
+    error PrefixAlreadyTaken();
+    error ExtensionNotFound();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -221,29 +229,40 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
         if (payload != bytes32(0) && sponsorships[payload].available >= fee) {
             return (SUBSIDY_MODE_FUND, payload);
         }
-        if (delegate != address(0)) {
-            try ISubsidiesExtension(delegate).chooseFund(from, to, value, nonce, callData, fee) returns (
-                uint256 delegatedMode,
-                bytes32 delegatedPayload
+        return _chooseExtensionFund(from, to, value, nonce, callData, fee);
+    }
+
+    /// @dev Probe registered extensions in order; the first one sponsoring the transaction wins.
+    function _chooseExtensionFund(
+        address from,
+        address to,
+        uint256 value,
+        uint256 nonce,
+        bytes calldata callData,
+        uint256 fee
+    ) private view returns (uint256 mode, bytes32 payload) {
+        uint256 length = extensions.length;
+        for (uint256 i = 0; i < length; ++i) {
+            try extensions[i].chooseFund(from, to, value, nonce, callData, fee) returns (
+                uint256 extensionMode,
+                bytes32 extensionPayload
             ) {
-                return (delegatedMode, delegatedPayload);
-            } catch {
-                return (SUBSIDY_MODE_NONE, bytes32(0));
-            }
+                if (extensionMode != SUBSIDY_MODE_NONE) {
+                    return (extensionMode, extensionPayload);
+                }
+            } catch {} // solhint-disable-line no-empty-blocks
         }
         return (SUBSIDY_MODE_NONE, bytes32(0));
     }
 
-    /// @notice Consume one free transfer from the sender's token bucket after a sponsored transaction.
+    /// @notice Report the gas fee of a tracked sponsored transaction to the issuing extension.
     /// @dev To be called only by the Sonic node (from the zero address) when chooseFund returned SUBSIDY_MODE_TRACKED.
-    /// @param trackingId The tracking ID returned by chooseFund. A non-zero top byte means it was issued by the delegate.
+    /// @param trackingId The tracking ID returned by chooseFund. Its top byte identifies the issuing extension.
     function track(bytes32 trackingId, uint256 fee) external {
         require(msg.sender == address(0), NotNode()); // must be called in an internal transaction
-        if (delegate != address(0)) {
-            ISubsidiesExtension(delegate).track(trackingId, fee);
-            return;
-        }
-        revert NotSponsored();
+        ISubsidiesExtension extension = extensionByPrefix[uint8(uint256(trackingId) >> 248)];
+        require(address(extension) != address(0), NotSponsored());
+        extension.track(trackingId, fee);
     }
 
     /// @notice Deduct transaction fees from a sponsorship fund.
@@ -255,16 +274,9 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
         require(msg.sender == address(0), NotNode()); // must be called in an internal transaction
         require(fundId != bytes32(0), ZeroFundId());
         Fund storage fund = sponsorships[fundId];
-        if (fund.available >= fee) {
-            fund.available -= fee;
-            SFC.burnNativeTokens{value: fee}();
-            return;
-        }
-        if (delegate != address(0)) {
-            ISubsidiesExtension(delegate).deductFees(fundId, fee);
-            return;
-        }
-        revert NotSponsored();
+        require(fund.available >= fee, NotSponsored());
+        fund.available -= fee;
+        SFC.burnNativeTokens{value: fee}();
     }
 
     /// @notice Insert funds into a specified sponsorship fund.
@@ -387,11 +399,39 @@ contract SubsidiesRegistry is ISubsidiesRegistry, OwnableUpgradeable, UUPSUpgrad
         _unpause();
     }
 
-    /// @notice Set or clear the delegate called when this contract cannot sponsor a transaction.
-    function setDelegate(address newDelegate) external onlyOwner {
-        require(newDelegate == address(0) || newDelegate.code.length != 0, "delegate must be a contract");
-        delegate = newDelegate;
-        emit DelegateChanged(newDelegate);
+    /// @notice Register an extension to be probed by chooseFund and to receive track() calls.
+    /// @dev The extension's tracking ID prefix must be unique among registered extensions.
+    function addExtension(ISubsidiesExtension extension) external onlyOwner {
+        uint8 prefix = extension.trackingIdPrefix();
+        require(address(extensionByPrefix[prefix]) == address(0), PrefixAlreadyTaken());
+        extensionByPrefix[prefix] = extension;
+        extensions.push(extension);
+        emit ExtensionAdded(address(extension), prefix);
+    }
+
+    /// @notice Unregister the extension with the given tracking ID prefix.
+    ///         Its tracked transactions will no longer be sponsored.
+    /// @dev The last extension is moved into the removed one's position,
+    ///      so the probing order of the remaining extensions may change.
+    function removeExtension(uint8 prefix) external onlyOwner {
+        ISubsidiesExtension extension = extensionByPrefix[prefix];
+        require(address(extension) != address(0), ExtensionNotFound());
+        delete extensionByPrefix[prefix];
+        uint256 length = extensions.length;
+        for (uint256 i = 0; i < length; ++i) {
+            if (extensions[i] == extension) {
+                // swap-and-pop: the last extension takes over the removed one's probing position
+                extensions[i] = extensions[length - 1];
+                extensions.pop();
+                break;
+            }
+        }
+        emit ExtensionRemoved(address(extension), prefix);
+    }
+
+    /// @notice The number of registered extensions.
+    function extensionsCount() external view returns (uint256) {
+        return extensions.length;
     }
 
     /// Override the upgrade authorization check to allow upgrades only from the owner.

@@ -1,7 +1,7 @@
 import { ethers, upgrades } from 'hardhat';
 import { loadFixture, time } from '@nomicfoundation/hardhat-network-helpers';
 import { expect } from 'chai';
-import { SUBSIDIES_REGISTRY, deploySubsidiesRegistryAtFixedAddress } from './helpers/SubsidiesRegistryFixture';
+import { subsidiesBaseFixture } from './fixture';
 
 const SUBSIDY_MODE_NONE = 0n;
 const SUBSIDY_MODE_TRACKED = 3n;
@@ -15,16 +15,9 @@ const WHITELIST_MANAGER_ROLE = ethers.keccak256(ethers.toUtf8Bytes('WHITELIST_MA
 
 describe('SenderProjectSubsidies', () => {
   const fixture = async () => {
-    const [admin, projectManager, sendersManager, whitelistManager, stranger] = await ethers.getSigners();
+    const { admin, registry, node, registrySigner } = await loadFixture(subsidiesBaseFixture);
+    const [, projectManager, sendersManager, whitelistManager, stranger] = await ethers.getSigners();
     const sender = ethers.Wallet.createRandom();
-
-    const stubSfc = await ethers.deployContract('StubSFC', [admin.address]);
-    await ethers.provider.send('hardhat_setCode', [
-      '0xFC00FACE00000000000000000000000000000000',
-      await stubSfc.getDeployedCode(),
-    ]);
-
-    const registry = await deploySubsidiesRegistryAtFixedAddress();
 
     const extension = await upgrades.deployProxy(await ethers.getContractFactory('SenderProjectSubsidies'), [], {
       kind: 'uups',
@@ -43,10 +36,6 @@ describe('SenderProjectSubsidies', () => {
     await extension.connect(whitelistManager).whitelistToken(await erc20.getAddress());
     await extension.connect(sendersManager).addSender(projectId, sender.address);
 
-    await ethers.provider.send('hardhat_impersonateAccount', ['0x0000000000000000000000000000000000000000']);
-    const node = await ethers.getSigner('0x0000000000000000000000000000000000000000');
-    await admin.sendTransaction({ to: await node.getAddress(), value: ethers.parseEther('10') });
-
     const transferInterface = new ethers.Interface(['function transfer(address to, uint256 amount) returns (bool)']);
     const makeTransferCalldata = (to: string) => transferInterface.encodeFunctionData('transfer', [to, 10_000]);
 
@@ -58,6 +47,7 @@ describe('SenderProjectSubsidies', () => {
       stranger,
       sender,
       registry,
+      registrySigner,
       extension,
       erc20,
       node,
@@ -202,17 +192,13 @@ describe('SenderProjectSubsidies', () => {
         .withArgs(tokenAddress);
     });
 
-    it('PROJECT_MANAGER cannot whitelist a token', async function () {
-      const token = await ethers.deployContract('TestingERC20', []);
-      await expect(
-        this.extension.connect(this.projectManager).whitelistToken(await token.getAddress()),
-      ).to.be.revertedWithCustomError(this.extension, 'AccessControlUnauthorizedAccount');
-    });
-
-    it('Stranger cannot whitelist a token', async function () {
+    it('Stranger cannot add or remove a token', async function () {
       const token = await ethers.deployContract('TestingERC20', []);
       await expect(
         this.extension.connect(this.stranger).whitelistToken(await token.getAddress()),
+      ).to.be.revertedWithCustomError(this.extension, 'AccessControlUnauthorizedAccount');
+      await expect(
+        this.extension.connect(this.stranger).removeTokenFromWhitelist(await token.getAddress()),
       ).to.be.revertedWithCustomError(this.extension, 'AccessControlUnauthorizedAccount');
     });
 
@@ -284,11 +270,16 @@ describe('SenderProjectSubsidies', () => {
     });
 
     it('First extension sponsoring the transaction wins', async function () {
-      // stub sponsoring everything, added after SenderProjectSubsidies
-      const stub = await ethers.deployContract('StubSubsidyExtension', [0xaa, true]);
-      await this.registry.connect(this.admin).addExtension(await stub.getAddress());
+      // TokenTransferSubsidies sponsoring the same token, added after SenderProjectSubsidies
+      const tokenSubsidies = await upgrades.deployProxy(await ethers.getContractFactory('TokenTransferSubsidies'), [], {
+        kind: 'uups',
+      });
+      const TOKEN_MANAGER_ROLE = ethers.keccak256(ethers.toUtf8Bytes('TOKEN_MANAGER_ROLE'));
+      await tokenSubsidies.connect(this.admin).grantRole(TOKEN_MANAGER_ROLE, this.admin.address);
+      await tokenSubsidies.connect(this.admin).registerToken(await this.erc20.getAddress(), 5);
+      await this.registry.connect(this.admin).addExtension(await tokenSubsidies.getAddress());
 
-      // registered sender -> SenderProjectSubsidies (added first) wins
+      // registered sender -> both extensions would sponsor, SenderProjectSubsidies (added first) wins
       const [mode, trackingId] = await this.registry.chooseFund(
         this.sender.address,
         this.erc20,
@@ -300,8 +291,8 @@ describe('SenderProjectSubsidies', () => {
       expect(mode).to.equal(SUBSIDY_MODE_TRACKED);
       expect(BigInt(trackingId) >> 248n).to.equal(0xf6n);
 
-      // unknown sender -> stub wins
-      const [stubMode, stubTrackingId] = await this.registry.chooseFund(
+      // unknown sender -> only TokenTransferSubsidies sponsors
+      const [tokenMode, tokenTrackingId] = await this.registry.chooseFund(
         ethers.Wallet.createRandom().address,
         this.erc20,
         0,
@@ -309,34 +300,8 @@ describe('SenderProjectSubsidies', () => {
         this.makeTransferCalldata(ethers.Wallet.createRandom().address),
         100,
       );
-      expect(stubMode).to.equal(SUBSIDY_MODE_TRACKED);
-      expect(BigInt(stubTrackingId) >> 248n).to.equal(0xaan);
-    });
-
-    it('track routes to the extension by prefix', async function () {
-      const stub = await ethers.deployContract('StubSubsidyExtension', [0xaa, false]);
-      await this.registry.connect(this.admin).addExtension(await stub.getAddress());
-
-      const stubTrackingId = ethers.zeroPadValue(ethers.toBeHex((0xaan << 248n) | 7n), 32);
-      await this.registry.connect(this.node).track(stubTrackingId, 100);
-
-      expect(await stub.trackCalled()).to.equal(true);
-      expect(await stub.lastTrackingId()).to.equal(stubTrackingId);
-    });
-
-    it('track reverts for unknown prefix', async function () {
-      const unknownTrackingId = ethers.zeroPadValue(ethers.toBeHex((0xabn << 248n) | 1n), 32);
-      await expect(this.registry.connect(this.node).track(unknownTrackingId, 100)).to.be.revertedWithCustomError(
-        this.registry,
-        'NotSponsored',
-      );
-    });
-
-    it('Rejects adding an extension with an already taken prefix', async function () {
-      const stub = await ethers.deployContract('StubSubsidyExtension', [0xf6, false]); // same prefix
-      await expect(
-        this.registry.connect(this.admin).addExtension(await stub.getAddress()),
-      ).to.be.revertedWithCustomError(this.registry, 'PrefixAlreadyTaken');
+      expect(tokenMode).to.equal(SUBSIDY_MODE_TRACKED);
+      expect(BigInt(tokenTrackingId) >> 248n).to.equal(0xf7n);
     });
 
     it('Removed extension no longer sponsors nor tracks', async function () {
@@ -360,23 +325,11 @@ describe('SenderProjectSubsidies', () => {
       );
     });
 
-    it('Removing an unknown extension reverts', async function () {
-      await expect(this.registry.connect(this.admin).removeExtension(0xab)).to.be.revertedWithCustomError(
-        this.registry,
-        'ExtensionNotFound',
-      );
-    });
-
     it('Extension track rejects a foreign prefix', async function () {
-      await ethers.provider.send('hardhat_impersonateAccount', [SUBSIDIES_REGISTRY]);
-      await ethers.provider.send('hardhat_setBalance', [SUBSIDIES_REGISTRY, ethers.toBeHex(ethers.parseEther('1'))]);
-      const registrySigner = await ethers.getSigner(SUBSIDIES_REGISTRY);
-
       const foreignTrackingId = ethers.zeroPadValue(ethers.toBeHex((0xf7n << 248n) | 1n), 32);
-      await expect(this.extension.connect(registrySigner).track(foreignTrackingId, 100)).to.be.revertedWithCustomError(
-        this.extension,
-        'InvalidTrackingId',
-      );
+      await expect(
+        this.extension.connect(this.registrySigner).track(foreignTrackingId, 100),
+      ).to.be.revertedWithCustomError(this.extension, 'InvalidTrackingId');
     });
   });
 

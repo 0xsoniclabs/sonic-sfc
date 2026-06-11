@@ -1,7 +1,7 @@
 import { ethers, upgrades } from 'hardhat';
 import { loadFixture, time } from '@nomicfoundation/hardhat-network-helpers';
 import { expect } from 'chai';
-import { deploySubsidiesRegistryAtFixedAddress } from './helpers/SubsidiesRegistryFixture';
+import { subsidiesBaseFixture } from './fixture';
 
 const SUBSIDY_MODE_NONE = 0n;
 const SUBSIDY_MODE_TRACKED = 3n;
@@ -11,16 +11,8 @@ const TOKEN_MANAGER_ROLE = ethers.keccak256(ethers.toUtf8Bytes('TOKEN_MANAGER_RO
 
 describe('TokenTransferSubsidies', () => {
   const fixture = async () => {
-    const [admin, tokenManager, stranger] = await ethers.getSigners();
-
-    // StubSFC uses immutable owner, so the value is embedded in bytecode after hardhat_setCode
-    const stubSfc = await ethers.deployContract('StubSFC', [admin.address]);
-    await ethers.provider.send('hardhat_setCode', [
-      '0xFC00FACE00000000000000000000000000000000',
-      await stubSfc.getDeployedCode(),
-    ]);
-
-    const registry = await deploySubsidiesRegistryAtFixedAddress();
+    const { admin, registry, node } = await loadFixture(subsidiesBaseFixture);
+    const [, tokenManager, stranger] = await ethers.getSigners();
 
     // initialize() reads owner from SubsidiesRegistry, so SubsidiesRegistry must be deployed first
     const extension = await upgrades.deployProxy(await ethers.getContractFactory('TokenTransferSubsidies'), [], {
@@ -33,10 +25,6 @@ describe('TokenTransferSubsidies', () => {
     const erc20 = await ethers.deployContract('TestingERC20', []);
     const dailyLimit = 10;
     await extension.connect(tokenManager).registerToken(await erc20.getAddress(), dailyLimit);
-
-    await ethers.provider.send('hardhat_impersonateAccount', ['0x0000000000000000000000000000000000000000']);
-    const node = await ethers.getSigner('0x0000000000000000000000000000000000000000');
-    await admin.sendTransaction({ to: await node.getAddress(), value: ethers.parseEther('10') });
 
     const transferInterface = new ethers.Interface(['function transfer(address to, uint256 amount) returns (bool)']);
     const makeTransferCalldata = (to: string) => transferInterface.encodeFunctionData('transfer', [to, 10_000]);

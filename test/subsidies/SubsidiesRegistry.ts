@@ -340,6 +340,48 @@ describe('SubsidiesRegistry', () => {
     });
   });
 
+  describe('Extensions', async function () {
+    // extensions are deployed as bare implementations: addExtension only calls the pure trackingIdPrefix()
+    it('Adds and removes an extension', async function () {
+      const extension = await ethers.deployContract('SenderProjectSubsidies');
+      const prefix = await extension.trackingIdPrefix();
+
+      await expect(this.registry.addExtension(extension))
+        .to.emit(this.registry, 'ExtensionAdded')
+        .withArgs(await extension.getAddress(), prefix);
+      expect(await this.registry.extensionsCount()).to.equal(1);
+      expect(await this.registry.extensionByPrefix(prefix)).to.equal(await extension.getAddress());
+
+      await expect(this.registry.removeExtension(prefix))
+        .to.emit(this.registry, 'ExtensionRemoved')
+        .withArgs(await extension.getAddress(), prefix);
+      expect(await this.registry.extensionsCount()).to.equal(0);
+      expect(await this.registry.extensionByPrefix(prefix)).to.equal(ethers.ZeroAddress);
+    });
+
+    it('Rejects adding an extension with an already taken prefix', async function () {
+      const extension = await ethers.deployContract('SenderProjectSubsidies');
+      const samePrefixExtension = await ethers.deployContract('SenderProjectSubsidies');
+      await this.registry.addExtension(extension);
+      await expect(this.registry.addExtension(samePrefixExtension)).to.be.revertedWithCustomError(
+        this.registry,
+        'PrefixAlreadyTaken',
+      );
+    });
+
+    it('Only owner can add and remove extensions', async function () {
+      const extension = await ethers.deployContract('SenderProjectSubsidies');
+      await expect(this.registry.connect(this.sponsor).addExtension(extension)).to.be.revertedWithCustomError(
+        this.registry,
+        'OwnableUnauthorizedAccount',
+      );
+      await this.registry.addExtension(extension);
+      await expect(
+        this.registry.connect(this.sponsor).removeExtension(await extension.trackingIdPrefix()),
+      ).to.be.revertedWithCustomError(this.registry, 'OwnableUnauthorizedAccount');
+    });
+  });
+
   it('Keeps existing storage layout unchanged', async function () {
     // check expected values are set in storage slots to make sure existing slots are unchanged
     await this.registry.setChooseFundGasLimit(0x45b24);

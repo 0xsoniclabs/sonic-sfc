@@ -126,7 +126,8 @@ contract TokenTransferSubsidies is ISubsidiesExtension, AccessControlUpgradeable
         if (callData.length == 68 && bytes4(callData[:4]) == IERC20.transfer.selector) {
             LeakyBucket storage bucket = tokenToBucket[to];
             if (bucket.lastTimestamp == 0) return (SUBSIDY_MODE_NONE, bytes32(0));
-            if (_freeTransfersRemaining(bucket) < 1) {
+            // the refill needs to be computed only for an empty bucket
+            if (bucket.count == 0 && _freeTransfersRemaining(bucket) == 0) {
                 return (SUBSIDY_MODE_NONE, bytes32(0)); // rate limit reached
             }
             return (SUBSIDY_MODE_TRACKED, TRACKING_ID_PREFIX | bytes32(uint256(uint160(to))));

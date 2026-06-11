@@ -168,7 +168,10 @@ contract SenderProjectSubsidies is ISubsidiesExtension, AccessControlUpgradeable
         if (projectId == 0) return (SUBSIDY_MODE_NONE, bytes32(0));
         LeakyBucket storage bucket = projectBuckets[projectId];
         if (bucket.lastTimestamp == 0) return (SUBSIDY_MODE_NONE, bytes32(0)); // project removed
-        if (_freeTransfersRemaining(bucket) < 1) return (SUBSIDY_MODE_NONE, bytes32(0)); // rate limit reached
+        // the refill needs to be computed only for an empty bucket
+        if (bucket.count == 0 && _freeTransfersRemaining(bucket) == 0) {
+            return (SUBSIDY_MODE_NONE, bytes32(0)); // rate limit reached
+        }
         return (SUBSIDY_MODE_TRACKED, TRACKING_ID_PREFIX | bytes32(uint256(projectId)));
     }
 

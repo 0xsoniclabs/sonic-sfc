@@ -194,9 +194,9 @@ contract SenderProjectSubsidies is ISubsidiesExtension, AccessControlUpgradeable
         bytes calldata callData,
         uint256 /*fee*/
     ) external view returns (uint256 mode, bytes32 payload) {
-        bool isWhitelistedTransfer =
-            (callData.length == 68 && bytes4(callData[:4]) == IERC20.transfer.selector && whitelistedTokens[to]) ||
-            (callData.length == 0 && value > 0 && whitelistedTokens[NATIVE_TOKEN]);
+        bool isWhitelistedTransfer = (callData.length == 68 &&
+            bytes4(callData[:4]) == IERC20.transfer.selector &&
+            whitelistedTokens[to]) || (callData.length == 0 && value > 0 && whitelistedTokens[NATIVE_TOKEN]);
         if (isWhitelistedTransfer) {
             return _trySponsor(senderToProject[from]);
         }

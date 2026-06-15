@@ -3,6 +3,8 @@ import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
 import { expect } from 'chai';
 
 const noFundId = '0x0000000000000000000000000000000000000000000000000000000000000000';
+const SUBSIDY_MODE_NONE = 0n;
+const SUBSIDY_MODE_FUND = 1n;
 
 describe('SubsidiesRegistry', () => {
   const fixture = async () => {
@@ -148,7 +150,8 @@ describe('SubsidiesRegistry', () => {
     it('Returns zero for unknown tx', async function () {
       const from = ethers.Wallet.createRandom();
       const to = ethers.Wallet.createRandom();
-      const choosenFundId = await this.registry.connect(this.node).chooseFund(from, to, 5, 1, '0x', 5);
+      const [mode, choosenFundId] = await this.registry.connect(this.node).chooseFund(from, to, 5, 1, '0x', 5);
+      expect(mode).to.equal(SUBSIDY_MODE_NONE);
       expect(choosenFundId).to.equal(noFundId);
     });
 
@@ -157,7 +160,8 @@ describe('SubsidiesRegistry', () => {
       const to = ethers.Wallet.createRandom();
       const expectedFundId = await this.registry.accountSponsorshipFundId(from);
       await this.registry.sponsor(expectedFundId, { value: 10 });
-      const chosenFundId = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
+      const [mode, chosenFundId] = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
+      expect(mode).to.equal(SUBSIDY_MODE_FUND);
       expect(chosenFundId).to.equal(expectedFundId);
     });
 
@@ -167,7 +171,8 @@ describe('SubsidiesRegistry', () => {
       const nonce = 123;
       const expectedFundId = await this.registry.accountNonceSponsorshipFundId(from, nonce);
       await this.registry.sponsor(expectedFundId, { value: 10 });
-      const chosenFundId = await this.registry.chooseFund(from, to, 5, nonce, '0x', 5);
+      const [mode, chosenFundId] = await this.registry.chooseFund(from, to, 5, nonce, '0x', 5);
+      expect(mode).to.equal(SUBSIDY_MODE_FUND);
       expect(chosenFundId).to.equal(expectedFundId);
     });
 
@@ -176,7 +181,8 @@ describe('SubsidiesRegistry', () => {
       const to = ethers.Wallet.createRandom();
       const expectedFundId = await this.registry.contractSponsorshipFundId(to);
       await this.registry.sponsor(expectedFundId, { value: 10 });
-      const choosenFundId = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
+      const [mode, choosenFundId] = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
+      expect(mode).to.equal(SUBSIDY_MODE_FUND);
       expect(choosenFundId).to.equal(expectedFundId);
     });
 
@@ -193,7 +199,8 @@ describe('SubsidiesRegistry', () => {
         expect(expectedFundId).to.not.equal(noFundId);
 
         await this.registry.sponsor(expectedFundId, { value: 10 });
-        const choosenFundId = await this.registry.chooseFund(from, this.erc20, 0, 1, calldata, 5);
+        const [mode, choosenFundId] = await this.registry.chooseFund(from, this.erc20, 0, 1, calldata, 5);
+        expect(mode).to.equal(SUBSIDY_MODE_FUND);
         expect(choosenFundId).to.equal(expectedFundId);
       });
 
@@ -205,7 +212,8 @@ describe('SubsidiesRegistry', () => {
         const approveInterface = new ethers.Interface(['function approve(address spender, uint256 amount)']);
         const calldata = approveInterface.encodeFunctionData('approve', [spender.address, 10_000]);
 
-        const choosenFundId = await this.registry.chooseFund(from, to, 0, 1, calldata, 5);
+        const [mode, choosenFundId] = await this.registry.chooseFund(from, to, 0, 1, calldata, 5);
+        expect(mode).to.equal(SUBSIDY_MODE_NONE);
         expect(choosenFundId).to.equal(noFundId);
       });
 
@@ -252,7 +260,7 @@ describe('SubsidiesRegistry', () => {
     });
   });
 
-  it('Enforce pause', async function () {
+  it('Enforces pause', async function () {
     await this.registry.connect(this.owner).pause();
     const fundId = '0x0000000000000000000000000000000000000000000000000000000000000123';
     await expect(this.registry.connect(this.sponsor).sponsor(fundId, { value: 100 })).to.be.revertedWithCustomError(
@@ -274,11 +282,13 @@ describe('SubsidiesRegistry', () => {
     const to = ethers.Wallet.createRandom();
     const expectedFundId = await this.registry.contractSponsorshipFundId(to);
     await this.registry.sponsor(expectedFundId, { value: 10 });
-    const choosenFundId = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
+    const [mode, choosenFundId] = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
+    expect(mode).to.equal(SUBSIDY_MODE_FUND);
     expect(choosenFundId).to.equal(expectedFundId);
 
     await this.registry.connect(this.owner).pause();
-    const choosenFundIdPaused = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
+    const [modePaused, choosenFundIdPaused] = await this.registry.chooseFund(from, to, 5, 1, '0x', 5);
+    expect(modePaused).to.equal(SUBSIDY_MODE_NONE);
     expect(choosenFundIdPaused).to.equal(noFundId);
   });
 
@@ -328,5 +338,107 @@ describe('SubsidiesRegistry', () => {
         .connect(this.node)
         .deductFees(fundId, 90, { gasLimit: (this.config.deductFeesGasLimit / 10n) * 8n });
     });
+  });
+
+  describe('Extensions', async function () {
+    // extensions are deployed as bare implementations: addExtension only calls the pure trackingIdPrefix()
+    it('Adds and removes an extension', async function () {
+      const extension = await ethers.deployContract('SenderProjectSubsidies');
+      const prefix = await extension.trackingIdPrefix();
+
+      await expect(this.registry.addExtension(extension))
+        .to.emit(this.registry, 'ExtensionAdded')
+        .withArgs(await extension.getAddress(), prefix);
+      expect(await this.registry.extensionsCount()).to.equal(1);
+      expect(await this.registry.extensionByPrefix(prefix)).to.equal(await extension.getAddress());
+
+      await expect(this.registry.removeExtension(prefix))
+        .to.emit(this.registry, 'ExtensionRemoved')
+        .withArgs(await extension.getAddress(), prefix);
+      expect(await this.registry.extensionsCount()).to.equal(0);
+      expect(await this.registry.extensionByPrefix(prefix)).to.equal(ethers.ZeroAddress);
+    });
+
+    it('Rejects adding an extension with an already taken prefix', async function () {
+      const extension = await ethers.deployContract('SenderProjectSubsidies');
+      const samePrefixExtension = await ethers.deployContract('SenderProjectSubsidies');
+      await this.registry.addExtension(extension);
+      await expect(this.registry.addExtension(samePrefixExtension)).to.be.revertedWithCustomError(
+        this.registry,
+        'PrefixAlreadyTaken',
+      );
+    });
+
+    it('Only owner can add and remove extensions', async function () {
+      const extension = await ethers.deployContract('SenderProjectSubsidies');
+      await expect(this.registry.connect(this.sponsor).addExtension(extension)).to.be.revertedWithCustomError(
+        this.registry,
+        'OwnableUnauthorizedAccount',
+      );
+      await this.registry.addExtension(extension);
+      await expect(
+        this.registry.connect(this.sponsor).removeExtension(await extension.trackingIdPrefix()),
+      ).to.be.revertedWithCustomError(this.registry, 'OwnableUnauthorizedAccount');
+    });
+  });
+
+  it('Keeps existing storage layout unchanged', async function () {
+    // check expected values are set in storage slots to make sure existing slots are unchanged
+    await this.registry.setChooseFundGasLimit(0x45b24);
+    await this.registry.connect(this.owner).setDeductFeesGasLimit(0xc0b00);
+    const fundId = '0x0000000000000000000000000000000000000000000000000000000000012345';
+    await this.registry.connect(this.sponsor).sponsor(fundId, { value: 100 });
+    await this.registry.connect(this.owner).sponsor(fundId, { value: 5 });
+    await this.registry.connect(this.node).deductFees(fundId, 20);
+
+    // chooseFundGasLimit
+    expect(
+      await ethers.provider.getStorage(
+        this.registry,
+        '0x0000000000000000000000000000000000000000000000000000000000000001',
+      ),
+    ).to.equal('0x0000000000000000000000000000000000000000000000000000000000045b24');
+
+    // deductFeesGasLimit
+    expect(
+      await ethers.provider.getStorage(
+        this.registry,
+        '0x0000000000000000000000000000000000000000000000000000000000000002',
+      ),
+    ).to.equal('0x00000000000000000000000000000000000000000000000000000000000c0b00');
+
+    // sponsorships[fundId].available
+    // 100 (sponsor) + 5 (owner) - 20 (deductFees) = 85
+    expect(
+      await ethers.provider.getStorage(
+        this.registry,
+        '0xc9c9d38ffc86e54587ebbb0f50fbfaeda01172f2ed3d3093531d3abcc205314b',
+      ),
+    ).to.equal('0x0000000000000000000000000000000000000000000000000000000000000055'); // 85
+
+    // sponsorships[fundId].totalContributions
+    // 100 (sponsor) + 5 (owner) = 105
+    expect(
+      await ethers.provider.getStorage(
+        this.registry,
+        '0xc9c9d38ffc86e54587ebbb0f50fbfaeda01172f2ed3d3093531d3abcc205314c',
+      ),
+    ).to.equal('0x0000000000000000000000000000000000000000000000000000000000000069'); // 105
+
+    // sponsorships[fundId].contributors[sponsor]
+    expect(
+      await ethers.provider.getStorage(
+        this.registry,
+        '0xb9fc4c92bf87aa6eea0ca28b75c46112578502a1be8e5f6953c874b662f70f63',
+      ),
+    ).to.equal('0x0000000000000000000000000000000000000000000000000000000000000064'); // 100
+
+    // sponsorships[fundId].contributors[owner]
+    expect(
+      await ethers.provider.getStorage(
+        this.registry,
+        '0x57a558bedd5b3f6e3c80604b7fc322e572f7273949f878b504489dea3e3cb1c3',
+      ),
+    ).to.equal('0x0000000000000000000000000000000000000000000000000000000000000005'); // 5
   });
 });

@@ -1,20 +1,17 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.27;
 
-// Transaction is not covered by gas subsidies.
-uint256 constant SUBSIDY_MODE_NONE = 0;
-// Transaction fee is deducted directly from a sponsorship fund.
-uint256 constant SUBSIDY_MODE_FUND = 1;
-// Transaction fee is tracked and reported via the track() callback.
-uint256 constant SUBSIDY_MODE_TRACKED = 3;
-
 /**
- * @title Subsidies Registry Interface
- * @notice Registry managing transaction sponsoring funds.
- * @dev Interface required by the Sonic client for the SubsidiesRegistry contract.
+ * @title Subsidies Registry Extension Interface
+ * @notice Extension of the registry managing transaction sponsoring funds.
  * @custom:security-contact security@fantom.foundation
  */
-interface ISubsidiesRegistry {
+interface ISubsidiesExtension {
+    /// @notice The top-byte prefix this extension embeds into its tracking IDs.
+    /// @dev The SubsidiesRegistry uses it to route track() calls to the issuing extension.
+    ///      Must be unique among extensions registered in the SubsidiesRegistry.
+    function trackingIdPrefix() external view returns (uint8);
+
     /// @notice Check if a transaction is covered by Gas Subsidies and return the fund to sponsor it.
     /// @param from Transaction sender
     /// @param to Transaction recipient (typically the called contract, zero for contract creation calls)
@@ -32,19 +29,6 @@ interface ISubsidiesRegistry {
         bytes calldata callData,
         uint256 fee
     ) external view returns (uint256 mode, bytes32 payload);
-
-    /// @notice Deduct transaction fees from a sponsorship fund.
-    /// @dev This function is intended to be called only by the Sonic node.
-    ///      Deducts the fee from the fund balance and burns the native tokens through SFC.
-    /// @param fundId The unique identifier of the sponsorship fund.
-    /// @param fee The fee amount to deduct (in wei).
-    function deductFees(bytes32 fundId, uint256 fee) external;
-
-    /// @notice Get gas config for Sonic-internal calls.
-    function getGasConfig()
-        external
-        view
-        returns (uint256 _chooseFundGasLimit, uint256 _deductFeesGasLimit, uint256 _overheadCharge);
 
     /// @notice Report the gas fee consumed by a network-sponsored tracked transaction.
     /// @dev This function is intended to be called only by the Sonic node - from the zero address.

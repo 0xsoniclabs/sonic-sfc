@@ -177,6 +177,12 @@ describe('PriorityRegistry', () => {
       this.registry.connect(this.user).setMaxGasPerTx(1),
     ).to.be.revertedWithCustomError(this.registry, 'AccessControlUnauthorizedAccount');
     await expect(
+      this.registry.connect(this.user).setMaxGasPerEntityPerBlock(1),
+    ).to.be.revertedWithCustomError(this.registry, 'AccessControlUnauthorizedAccount');
+    await expect(
+      this.registry.connect(this.user).setMaxPiggybackTxsPerEntityPerEvent(1),
+    ).to.be.revertedWithCustomError(this.registry, 'AccessControlUnauthorizedAccount');
+    await expect(
       this.registry.connect(this.user).upgradeToAndCall(await this.registry.getAddress(), '0x'),
     ).to.be.revertedWithCustomError(this.registry, 'AccessControlUnauthorizedAccount');
   });

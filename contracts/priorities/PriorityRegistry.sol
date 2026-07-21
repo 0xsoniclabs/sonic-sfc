@@ -74,12 +74,26 @@ contract PriorityRegistry is
     /** @notice Default value of `maxPiggybackTxsPerEntityPerEventValue` when it is unset. */
     uint256 public constant DEFAULT_MAX_PIGGYBACK_PER_EVENT = 4;
 
+    /** @notice Emitted when a sender's priority is set. */
+    event SenderPrioritySet(address indexed sender, uint128 level, uint128 weight, bytes32 entityId);
+
+    /** @notice Emitted when the maximum gas limit for a transaction to be prioritized is changed. */
+    event MaxGasPerTxSet(uint256 newMaxGasPerTx);
+
+    /** @notice Emitted when the per-entity per-block gas budget is changed. */
+    event MaxGasPerEntityPerBlockSet(uint256 newMaxGasPerEntityPerBlock);
+
+    /** @notice Emitted when the per-entity per-event piggyback cap is changed. */
+    event MaxPiggybackTxsPerEntityPerEventSet(uint256 newMaxPiggybackTxsPerEntityPerEvent);
+
     /** @custom:oz-upgrades-unsafe-allow constructor */
     constructor() {
         _disableInitializers();
     }
 
-    /** @notice Initialize the contract with an admin and enable upgradability. The admin is copied from the SFC contract. */
+    /**
+     * @notice Initialize the contract with an admin from SFC and enable upgradability.
+     */
     function initialize() external initializer {
         __AccessControl_init();
         __UUPSUpgradeable_init();
@@ -101,6 +115,7 @@ contract PriorityRegistry is
         bytes32 entityId
     ) external onlyRole(PRIORITY_MANAGER_ROLE) {
         senderPriority[sender] = Priority(level, weight, entityId);
+        emit SenderPrioritySet(sender, level, weight, entityId);
     }
 
     /**
@@ -109,6 +124,7 @@ contract PriorityRegistry is
      */
     function setMaxGasPerTx(uint256 newMaxGasPerTx) external onlyRole(CONFIGURATOR_ROLE) {
         maxGasPerTx = newMaxGasPerTx;
+        emit MaxGasPerTxSet(newMaxGasPerTx);
     }
 
     /**
@@ -117,14 +133,16 @@ contract PriorityRegistry is
      */
     function setMaxGasPerEntityPerBlock(uint256 perBlockGas) external onlyRole(CONFIGURATOR_ROLE) {
         maxGasPerEntityPerBlock = perBlockGas;
+        emit MaxGasPerEntityPerBlockSet(perBlockGas);
     }
 
     /**
      * @notice Set the per-entity cap on foreign piggybacked transactions.
-     * @param perEvent New per-entity cap on foreign piggybacked transactions.
+     * @param perEventPiggybacks New per-entity cap on foreign piggybacked transactions.
      */
-    function setMaxPiggybackTxsPerEntityPerEvent(uint256 perEvent) external onlyRole(CONFIGURATOR_ROLE) {
-        maxPiggybackTxsPerEntityPerEvent = perEvent;
+    function setMaxPiggybackTxsPerEntityPerEvent(uint256 perEventPiggybacks) external onlyRole(CONFIGURATOR_ROLE) {
+        maxPiggybackTxsPerEntityPerEvent = perEventPiggybacks;
+        emit MaxPiggybackTxsPerEntityPerEventSet(perEventPiggybacks);
     }
 
     /**
@@ -141,7 +159,8 @@ contract PriorityRegistry is
         if (paused()) {
             return (0, 0, bytes32(0)); // paused, no priority for anyone
         }
-        if (maxGasPerTx != 0 && gasLimit > maxGasPerTx) {
+        uint256 gasLimitCap = maxGasPerTx;
+        if (gasLimitCap != 0 && gasLimit > gasLimitCap) {
             return (0, 0, bytes32(0)); // limit exceeded, no priority
         }
         Priority storage p = senderPriority[from];
@@ -156,20 +175,23 @@ contract PriorityRegistry is
         view
         returns (uint256 _maxGasPerEntityPerBlock, uint256 _maxPiggybackTxsPerEntityPerEvent)
     {
-        _maxGasPerEntityPerBlock = maxGasPerEntityPerBlock == 0
-            ? DEFAULT_MAX_GAS_PER_BLOCK
-            : maxGasPerEntityPerBlock;
-        _maxPiggybackTxsPerEntityPerEvent = maxPiggybackTxsPerEntityPerEvent == 0
-            ? DEFAULT_MAX_PIGGYBACK_PER_EVENT
-            : maxPiggybackTxsPerEntityPerEvent;
+        _maxGasPerEntityPerBlock = maxGasPerEntityPerBlock;
+        if (_maxGasPerEntityPerBlock == 0) {
+            _maxGasPerEntityPerBlock = DEFAULT_MAX_GAS_PER_BLOCK;
+        }
+
+        _maxPiggybackTxsPerEntityPerEvent = maxPiggybackTxsPerEntityPerEvent;
+        if (_maxPiggybackTxsPerEntityPerEvent == 0) {
+            _maxPiggybackTxsPerEntityPerEvent = DEFAULT_MAX_PIGGYBACK_PER_EVENT;
+        }
     }
 
-    /** @notice Pause the registry and transactions prioritization. */
+    /** @notice Pause the transactions prioritization. */
     function pause() external onlyRole(PAUSER_ROLE) {
         _pause();
     }
 
-    /** @notice Unpause the registry and transactions prioritization. */
+    /** @notice Unpause the transactions prioritization. */
     function unpause() external onlyRole(PAUSER_ROLE) {
         _unpause();
     }

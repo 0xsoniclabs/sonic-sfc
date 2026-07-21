@@ -89,15 +89,15 @@ contract PriorityRegistry is
 
     /**
      * @notice Set the priority of a sender.
-     * @param from Sender to assign the priority to.
+     * @param sender Sender to assign the priority to.
      * @param level Priority level: 0 = no priority; > 0 = prioritized, higher levels go first.
      * @param weight Tie-breaker within a level - higher weights go first.
-     * @param id Entity identifier; transactions sharing an id are rate-limited together.
+     * @param entityId Entity identifier; transactions sharing an id are rate-limited together.
      */
     function setSenderPriority(
         address sender,
-        uint256 level,
-        uint256 weight,
+        uint128 level,
+        uint128 weight,
         bytes32 entityId
     ) external onlyRole(PRIORITY_MANAGER_ROLE) {
         senderPriority[sender] = Priority(level, weight, entityId);
@@ -138,6 +138,9 @@ contract PriorityRegistry is
         bytes calldata /*callData*/,
         uint256 gasLimit
     ) external view returns (uint256 level, uint256 weight, bytes32 id) {
+        if (paused()) {
+            return (0, 0, bytes32(0)); // paused, no priority for anyone
+        }
         if (maxGasPerTx != 0 && gasLimit > maxGasPerTx) {
             return (0, 0, bytes32(0)); // limit exceeded, no priority
         }
@@ -151,12 +154,12 @@ contract PriorityRegistry is
     function getPriorityConfig()
         external
         view
-        returns (uint256 maxGasPerEntityPerBlock, uint256 maxPiggybackTxsPerEntityPerEvent)
+        returns (uint256 _maxGasPerEntityPerBlock, uint256 _maxPiggybackTxsPerEntityPerEvent)
     {
-        maxGasPerEntityPerBlock = maxGasPerEntityPerBlock == 0
+        _maxGasPerEntityPerBlock = maxGasPerEntityPerBlock == 0
             ? DEFAULT_MAX_GAS_PER_BLOCK
             : maxGasPerEntityPerBlock;
-        maxPiggybackTxsPerEntityPerEvent = maxPiggybackTxsPerEntityPerEvent == 0
+        _maxPiggybackTxsPerEntityPerEvent = maxPiggybackTxsPerEntityPerEvent == 0
             ? DEFAULT_MAX_PIGGYBACK_PER_EVENT
             : maxPiggybackTxsPerEntityPerEvent;
     }

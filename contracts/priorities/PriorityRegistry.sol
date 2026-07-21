@@ -1,0 +1,175 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity 0.8.27;
+
+import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {IPriorityRegistry} from "../interfaces/IPriorityRegistry.sol";
+import {ISFC} from "../interfaces/ISFC.sol";
+import {Version} from "../version/Version.sol";
+
+/**
+ * @title Priority Registry
+ * @notice Registry managing transactions prioritization on the Sonic chain.
+ * @dev Transactions are prioritized by sender, and the node enforces per-entity rate limits.
+ *
+ * For each transaction the node queries `getPriority`, which returns a (level, weight, id) triple:
+ *   - level:  0 = no priority; > 0 = prioritized (higher level scheduled first).
+ *   - weight: tie-breaker within a level (higher first).
+ *   - id:     entity identifier used for per-entity rate limiting.
+ *
+ * `getPriorityConfig` returns the per-entity rate limits enforced by the node
+ * during block formation and event emission.
+ *
+ * The registry is governed and upgradeable behind a proxy.
+ * The node depends only on the IPriorityRegistry interface ABI.
+ * @custom:security-contact security@fantom.foundation
+ */
+contract PriorityRegistry is
+    IPriorityRegistry,
+    AccessControlUpgradeable,
+    UUPSUpgradeable,
+    PausableUpgradeable,
+    Version
+{
+    /**
+     * @notice Priority assigned to transactions of an entity.
+     * @dev Storage layout for the `(level, weight, id)` triple returned by `getPriority`.
+     */
+    struct Priority {
+        /** @notice 0 = no priority; > 0 = prioritized (higher level scheduled first). */
+        uint128 level;
+        /** @notice Tie-breaker within a level (higher first). */
+        uint128 weight;
+        /** @notice Entity identifier used for per-entity rate limiting. */
+        bytes32 id;
+    }
+
+    ISFC private constant SFC = ISFC(0xFC00FACE00000000000000000000000000000000);
+
+    /** @notice Role allowed to configure sender priorities and rate limits. */
+    bytes32 public constant PRIORITY_MANAGER_ROLE = keccak256("PRIORITY_MANAGER_ROLE");
+
+    /** @notice Role allowed to configure system-wide configuration. */
+    bytes32 public constant CONFIGURATOR_ROLE = keccak256("CONFIGURATOR_ROLE");
+
+    /** @notice Role allowed to pause and unpause the registry. */
+    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+
+    /** @notice Priority assigned to transactions by sender. */
+    mapping(address => Priority) public senderPriority;
+
+    /** @notice Maximum gas limit for a transaction to be prioritized. Zero disables the gas filter. */
+    uint256 public maxGasPerTx;
+
+    /** @notice Per-entity total gas budget within a single block. Zero selects `DEFAULT_MAX_GAS_PER_BLOCK`. */
+    uint256 public maxGasPerEntityPerBlock;
+
+    /** @notice Per-entity cap on foreign piggybacked transactions per event. Zero selects `DEFAULT_MAX_PIGGYBACK_PER_EVENT`. */
+    uint256 public maxPiggybackTxsPerEntityPerEvent;
+
+    /** @notice Default value of `maxGasPerEntityPerBlockValue` when it is unset. */
+    uint256 public constant DEFAULT_MAX_GAS_PER_BLOCK = 10_000_000;
+
+    /** @notice Default value of `maxPiggybackTxsPerEntityPerEventValue` when it is unset. */
+    uint256 public constant DEFAULT_MAX_PIGGYBACK_PER_EVENT = 4;
+
+    /** @custom:oz-upgrades-unsafe-allow constructor */
+    constructor() {
+        _disableInitializers();
+    }
+
+    /** @notice Initialize the contract with an admin and enable upgradability. The admin is copied from the SFC contract. */
+    function initialize() external initializer {
+        __AccessControl_init();
+        __UUPSUpgradeable_init();
+        __Pausable_init();
+        _grantRole(DEFAULT_ADMIN_ROLE, SFC.owner());
+    }
+
+    /**
+     * @notice Set the priority of a sender.
+     * @param from Sender to assign the priority to.
+     * @param level Priority level: 0 = no priority; > 0 = prioritized, higher levels go first.
+     * @param weight Tie-breaker within a level - higher weights go first.
+     * @param id Entity identifier; transactions sharing an id are rate-limited together.
+     */
+    function setSenderPriority(
+        address sender,
+        uint256 level,
+        uint256 weight,
+        bytes32 entityId
+    ) external onlyRole(PRIORITY_MANAGER_ROLE) {
+        senderPriority[sender] = Priority(level, weight, entityId);
+    }
+
+    /**
+     * @notice Set the maximum gas limit for a transaction to be prioritized. Zero disables this filter.
+     * @param newMaxGasPerTx New maximum gas limit.
+     */
+    function setMaxGasPerTx(uint256 newMaxGasPerTx) external onlyRole(CONFIGURATOR_ROLE) {
+        maxGasPerTx = newMaxGasPerTx;
+    }
+
+    /**
+     * @notice Set the per-entity rate limits enforced by the node.
+     * @param perBlockGas New maximal gas per entity and block.
+     */
+    function setMaxGasPerEntityPerBlock(uint256 perBlockGas) external onlyRole(CONFIGURATOR_ROLE) {
+        maxGasPerEntityPerBlock = perBlockGas;
+    }
+
+    /**
+     * @notice Set the per-entity cap on foreign piggybacked transactions.
+     * @param perEvent New per-entity cap on foreign piggybacked transactions.
+     */
+    function setMaxPiggybackTxsPerEntityPerEvent(uint256 perEvent) external onlyRole(CONFIGURATOR_ROLE) {
+        maxPiggybackTxsPerEntityPerEvent = perEvent;
+    }
+
+    /**
+     * @inheritdoc IPriorityRegistry
+     */
+    function getPriority(
+        address from,
+        address /*to*/,
+        uint256 /*value*/,
+        uint256 /*nonce*/,
+        bytes calldata /*callData*/,
+        uint256 gasLimit
+    ) external view returns (uint256 level, uint256 weight, bytes32 id) {
+        if (maxGasPerTx != 0 && gasLimit > maxGasPerTx) {
+            return (0, 0, bytes32(0)); // limit exceeded, no priority
+        }
+        Priority storage p = senderPriority[from];
+        return (p.level, p.weight, p.id);
+    }
+
+    /**
+     * @inheritdoc IPriorityRegistry
+     */
+    function getPriorityConfig()
+        external
+        view
+        returns (uint256 maxGasPerEntityPerBlock, uint256 maxPiggybackTxsPerEntityPerEvent)
+    {
+        maxGasPerEntityPerBlock = maxGasPerEntityPerBlock == 0
+            ? DEFAULT_MAX_GAS_PER_BLOCK
+            : maxGasPerEntityPerBlock;
+        maxPiggybackTxsPerEntityPerEvent = maxPiggybackTxsPerEntityPerEvent == 0
+            ? DEFAULT_MAX_PIGGYBACK_PER_EVENT
+            : maxPiggybackTxsPerEntityPerEvent;
+    }
+
+    /** @notice Pause the registry and transactions prioritization. */
+    function pause() external onlyRole(PAUSER_ROLE) {
+        _pause();
+    }
+
+    /** @notice Unpause the registry and transactions prioritization. */
+    function unpause() external onlyRole(PAUSER_ROLE) {
+        _unpause();
+    }
+
+    function _authorizeUpgrade(address) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
+}

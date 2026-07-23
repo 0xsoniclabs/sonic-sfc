@@ -38,11 +38,11 @@ contract PriorityRegistry is
      */
     struct Priority {
         /** @notice 0 = no priority; > 0 = prioritized (higher level scheduled first). */
-        uint128 level;
+        uint64 level;
         /** @notice Tie-breaker within a level (higher first). */
-        uint128 weight;
+        uint64 weight;
         /** @notice Entity identifier used for per-entity rate limiting. */
-        bytes32 id;
+        uint128 id;
     }
 
     ISFC private constant SFC = ISFC(0xFC00FACE00000000000000000000000000000000);
@@ -75,7 +75,7 @@ contract PriorityRegistry is
     uint256 public constant DEFAULT_MAX_PIGGYBACK_PER_EVENT = 4;
 
     /** @notice Emitted when a sender's priority is set. */
-    event SenderPrioritySet(address indexed sender, uint128 level, uint128 weight, bytes32 entityId);
+    event SenderPrioritySet(address indexed sender, uint64 level, uint64 weight, uint128 entityId);
 
     /** @notice Emitted when the maximum gas limit for a transaction to be prioritized is changed. */
     event MaxGasPerTxSet(uint256 newMaxGasPerTx);
@@ -110,9 +110,9 @@ contract PriorityRegistry is
      */
     function setSenderPriority(
         address sender,
-        uint128 level,
-        uint128 weight,
-        bytes32 entityId
+        uint64 level,
+        uint64 weight,
+        uint128 entityId
     ) external onlyRole(PRIORITY_MANAGER_ROLE) {
         senderPriority[sender] = Priority(level, weight, entityId);
         emit SenderPrioritySet(sender, level, weight, entityId);
@@ -155,13 +155,13 @@ contract PriorityRegistry is
         uint256 /*nonce*/,
         bytes calldata /*callData*/,
         uint256 gasLimit
-    ) external view returns (uint256 level, uint256 weight, bytes32 id) {
+    ) external view returns (uint64 level, uint64 weight, uint128 id) {
         if (paused()) {
-            return (0, 0, bytes32(0)); // paused, no priority for anyone
+            return (0, 0, 0); // paused, no priority for anyone
         }
         uint256 gasLimitCap = maxGasPerTx;
         if (gasLimitCap != 0 && gasLimit > gasLimitCap) {
-            return (0, 0, bytes32(0)); // limit exceeded, no priority
+            return (0, 0, 0); // limit exceeded, no priority
         }
         Priority storage p = senderPriority[from];
         return (p.level, p.weight, p.id);

@@ -27,7 +27,7 @@ interface IPriorityRegistry {
         uint256 nonce,
         bytes calldata callData,
         uint256 gasLimit
-    ) external view returns (uint256 level, uint256 weight, bytes32 id);
+    ) external view returns (uint64 level, uint64 weight, uint128 id);
 
     /**
      * @notice Get the per-entity rate limits enforced by the node.
